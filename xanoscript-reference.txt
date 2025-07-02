@@ -1,0 +1,8215 @@
+
+
+
+xanoscript - syntax:
+
+
+# XanoScript Syntax Guide
+
+## Main file types
+
+### Table
+
+Defines a database table’s schema and indexes. When creating a table, it should be created in the virtual file system dbo:/
+
+**Example**:
+
+```xs
+table user {
+  schema {
+    int id {
+      description = "the use ID"
+    }
+    text name filters=trim
+    email email filters=trim|lower
+  }
+
+  index = [
+    {type: "primary", field: [{name: "id"}]}
+    {type: "gin", field: [{name: "xdo", op: "jsonb_path_op"}]}
+  ]
+}
+```
+
+A table should have two main blocks:
+
+- Fields defined in `schema`.
+
+Another example with relationships between tables:
+
+```xs
+table book {
+  auth = false
+  schema {
+    int id
+    timestamp created_at?=now
+    text title filters=trim
+    text description filters=trim
+    text isbn filters=trim
+    decimal price?=0 filters=min:0
+    int stock_quantity?=0 filters=min:0
+    int author_id filters=min:0 {
+      dbtable = "author"
+    }
+    int category_id filters=min:0 {
+      dbtable = "category"
+    }
+    text cover_image_url filters=trim
+  }
+
+  index = [
+    {type: "primary", field: [{name: "id"}]}
+    {type: "btree", field: [{name: "created_at", op: "desc"}]}
+    {type: "btree", field: [{name: "author_id", op: "asc"}]}
+    {type: "btree", field: [{name: "category_id", op: "asc"}]}
+    {type: "btree|unique", field: [{name: "isbn", op: "asc"}]}
+  ]
+
+  security = {guid: "0RyBYOGzjhZaZv5VuL-59EfUU8w"}
+}
+```
+
+### Function
+
+Reusable code block with inputs and outputs. When creating a function, it should be created in the virtual file system cfn:/
+
+**Example**:
+
+```xs
+function add_numbers {
+  input {
+    int a
+    int b
+  }
+
+  stack {
+    math.add $a {
+      value = $b
+      description = "Addition"
+    }
+  }
+
+  response {
+    value = $a
+  }
+}
+```
+
+A function requires three main blocks, if one is missing the function won't work:
+
+- `input`: Parameters.
+- `stack`: Logic.
+- `response`: Output.
+
+The response can be ignored by using a return statement in the stack block.
+
+### Query
+
+API endpoint for handling HTTP requests. When creating a query, it should be created in the virtual file system api:/
+
+**Example**:
+
+```xs
+query users verb=GET {
+  input {
+    text filter
+  }
+
+  stack {
+    db.query user {
+      search = $db.user.name|contains:$input.filter
+      description = "Search users"
+    } as $users
+  }
+
+  response {
+    value = $users
+  }
+}
+```
+
+A query requires three main blocks, if one is missing the query won't work:
+
+- `input`: Request data.
+- `stack`: Processing.
+- `response`: Returned data.
+
+The response can be ignored by using a return statement in the stack block.
+
+### Task
+
+Scheduled job for automation. When creating a task, it should be created in the virtual file system task:/
+
+**Example**:
+
+```xs
+task "daily_backup" {
+  stack {
+    db.update user {
+      search = $db.user.last_login > "2025-01-01"
+      update = {backup: true}
+    } as $backedup_users
+  }
+
+  schedule {
+    events = [
+      {starts_on: 2025-01-01 00:00:00+0000, freq: 86400}
+    ]
+  }
+}
+```
+
+- `stack`: Job logic.
+- `schedule`: Timing details.
+
+## Notes
+
+### Description
+
+Xanoscript does not allow for comments, instead you can use the `description` field to add comments to your code. Almost every block (response does not) can have a description field:
+
+```xs
+int id {
+  description = "I am an input type integer"
+}
+```
+
+```xs
+math.add $a {
+  value = $b
+  description = "Add $a to $b"
+}
+```
+
+**NEVER USE `//` or `/* */` TO ADD COMMENT OR COMMENT YOUR CODE, IT WILL BREAK THE CODE.**
+
+### Calling a function
+
+Function are called using the function.run followed by the function's name. The input is provided in the input block and the return value is stored in a variable.
+
+```xs
+function.run add_numbers {
+  input = { a: 5, b: $input.b }
+} as $return_value
+```
+
+the return value is stored in the variable `$return_value`. Function can call themselves (recursion) or other functions. A function cannot be use directly as a value for another argument, instead the variable that stores the return value should be used.
+
+### Expression
+
+Expression are used to build values faster, they are delcared withing two backticks ` symbols.
+
+**Example**: to create an array
+
+```xs
+var my_array {
+  value = ["a", "b", "c"]
+}
+```
+
+**Example**: math operation
+
+```xs
+var average {
+  value = ($a + $b + $c) / 3
+}
+```
+
+**Example**: string interpolation in an expression
+
+```xs
+var message {
+  value = "Hello " ~ $name ~ "welcome to XanoScript"
+}
+```
+
+**Example**: string interpolation using a filter
+
+```xs
+var message {
+  value = "Hello "|concat:$name
+}
+```
+
+### Comparison
+
+Comparison operators are used to compare two values. The result of a comparison is a boolean value, either `true` or `false`.
+
+- **Example**: `$a == $b` → `true` if `$a` is equal to `$b`, `false` otherwise.
+- **Example**: `$a != $b` → `true` if `$a` is not equal to `$b`, `false` otherwise.
+- **Example**: `$a > $b` → `true` if `$a` is greater than `$b`, `false` otherwise.
+- **Example**: `$a < $b` → `true` if `$a` is less than `$b`, `false` otherwise.
+- **Example**: `$a >= $b` → `true` if `$a` is greater than or equal to `$b`, `false` otherwise.
+- **Example**: `$a <= $b` → `true` if `$a` is less than or equal to `$b`, `false` otherwise.
+
+You can also combine comparison operators with the ternary operator to create conditional expressions.
+
+- **Example**: `$a > $b ? "a is greater" : "b is greater"` → `"a is greater"` if `$a` is greater than `$b`, `"b is greater"` otherwise.
+
+comparison operators should be used in an expression for example:
+
+```xs
+var is_greater {
+  value = $a > $b ? "a is greater" : "b is greater"
+}
+```
+
+or a test block
+
+```xs
+conditional {
+  if ($a >= $b){
+    debug.log {
+      value = "a is greater than or equal to b"
+    }
+  }
+  else {
+    debug.log {
+      value = "a is less than b"
+    }
+  }
+}
+```
+
+### Environment Variables
+
+Environment variables can be used in XanoScript by using the `$env` prefix. The user can set their own environment variables, xano also provides some built-in environment variables. The following are some of the built-in environment variables:
+
+- `$env.$remote_ip`:this is a special environment variable that resolves to the IP address of the individual accessing the API endpoint.
+- `$env.$http_headers`:this is a text array of headers that are sent to the API endpoint.
+- `$env.$request_uri`:this is a special environment variable that contains the URI that is being accessed from the API.
+- `$env.$request_method`:this is the method (GET, POST, DELETE, etc) of the incoming API request.
+- `$env.$request_querystring`:this is a special environment variable that contains the query string of the URI that is being accessed from the API.
+- `$env.$datasource`:this is a special environment variable that contains which datasource is being used.
+- `$env.$branch`:this is a special environment variable that contains which branch is being used.
+
+### Filters
+
+filters can be used to shape data before within an expression
+
+**Example**: using a filter
+
+```xs
+var array_length {
+  value = [1,2,3]|count
+}
+```
+
+When applying filters on different values, they should be isolated in parentheses.
+
+**Example**: applying filters on different values
+
+```xs
+var $next_term {
+  value = ($fibonacci|last) + ($fibonacci|array_pop)
+}
+```
+
+#### trim
+
+Removes whitespace or specified characters from both ends of a string.
+
+- **Example**: `"  Hello World  "|trim` → `"Hello World"`
+
+#### lower
+
+Converts all characters to lowercase.
+
+- **Example**: `"Epic Battle"|lower` → `"epic battle"`
+
+#### upper
+
+Converts all characters to uppercase.
+
+- **Example**: `"Epic Battle"|upper` → `"EPIC BATTLE"`
+
+#### contains
+
+Checks if a string contains a specified substring.
+
+- **Example**: `"Epic Battle"|contains:"Battle"` → `true`
+
+#### icontains
+
+Case-insensitive check for a substring.
+
+- **Example**: `"Epic Battle"|icontains:"battle"` → `true`
+
+#### strlen
+
+Returns the number of characters in a string.
+
+- **Example**: `"Epic Battle"|strlen` → `11`
+
+#### array_push
+
+Adds an element to the end of an array.
+
+- **Example**: `[1,2,3]|array_push:"a"` → `[1,2,3,"a"]`
+
+#### array_pop
+
+Removes and returns the last element of an array.
+
+- **Example**: `[1,2,3]|array_pop` → `3`
+
+#### array_merge
+
+Merges two arrays into a single array.
+
+- **Example**: `[1,2,3]|merge:["a","b"]` → `[1,2,3,"a","b"]`
+
+#### count
+
+Returns the number of items in an array or object.
+
+- **Example**: `["five","six","seven"]|count` → `3`
+
+#### first
+
+Returns the first element of an array.
+
+- **Example**: `["five","six","seven"]|first` → `"five"`
+
+#### last
+
+Returns the last element of an array.
+
+- **Example**: `["five","six","seven"]|last` → `"seven"`
+
+#### filter_empty
+
+Filters out empty values (e.g., `""`, `null`, `0`, `false`, `[]`, `{}`) from an array.
+
+- **Example**: `[{a:1, b:null}, {a:0, b:4}]|filter_empty:a` → `[{a:1, b:null}]`
+
+#### fsort
+
+Sorts an array with options for path, type (e.g., `text`, `number`), and direction (`asc`/`desc`).
+
+- **Example**: `[{v:"a"}, {v:"z"}]|fsort:v:text:true` → `[{v:"a"}, {v:"z"}]`
+
+#### json_encode
+
+Encodes a value as JSON text.
+
+- **Example**: `{"fizz":"buzz"}|json_encode` → `"{\"fizz\":\"buzz\"}"`
+
+#### json_decode
+
+Decodes a JSON text into a value.
+
+- **Example**: `'{ "fizz": "buzz" }'|json_decode` → `{"fizz":"buzz"}`
+
+#### concat
+
+Concatenates two strings.
+
+- **Example**: `"Hello "|concat:"World"` → `"Hello World"`
+
+#### replace
+
+Replaces a substring with another substring.
+
+- **Example**: `"Hello {NAME}"|replace:"{NAME}":$user.name` → `"Hello John"`
+
+#### format_timestamp
+
+Converts a timestamp into a human-readable formatted date based on the supplied format. This format follows the [PHP DateTime format](https://www.php.net/manual/en/datetime.format.php).
+
+Inputs:
+
+primary value: The timestamp to format (epoch in milliseconds)
+format: The format string specifying how the timestamp should be displayed
+timezone: The timezone to provide the formatted timestamp in
+
+- **Example**: `1698710400000|format_timestamp:"Y-m-d":"UTC"` → `"2023-10-31"`
+- **Example**: `1698710400000|format_timestamp:"M d, Y h:i A":"UTC"` → `"Oct 31, 2023 12:00 AM"`
+- **Example**: `now|to_timestamp|format_timestamp:"l, F j, Y":"UTC"` → `"Tuesday, October 31, 2023"`
+
+#### parse_timestamp
+
+Parses a human-readable date string into an epoch millisecond timestamp.
+
+- **Example**: `"2023-10-31 14:30:15"|parse_timestamp:"YYYY-MM-DD HH:mm:ss":"UTC"` → `1698765015000`
+
+#### transform_timestamp
+
+Applies a relative transformation to a given timestamp.
+
+- **Example**: `1698710400000|transform_timestamp:"-7 days":"UTC"` → `1698105600000`
+- **Example**: `now|to_timestamp|transform_timestamp:"last day of this month":"UTC"` → `1698105600000`
+
+## Important rules:
+
+- **Never use comments**, always use the description field to add comments to your code.
+- respect the placement of the response, input, stack, and schedule blocks: they appear only and at the root level of the function, query, and task blocks.
+- Double check that the function you are calling exist in the reference file, do not invent function names.
+
+xanoscript-function examples:
+
+# stack
+
+```xs
+stack {
+  var $counter {
+    value = 0
+  }
+  for (3) {
+    each as $index {
+      math.add $counter {
+        value = 1
+      }
+    }
+  }
+  debug.log {
+    value = $counter
+  }
+}
+```
+
+A `stack` block defines a sequence of actions to be executed in a specific context, such as within a `query`, `function`, `task`, or other block (e.g., `group`, `transaction`). It acts as a container for operations like:
+
+- Variable declarations (e.g., `var`),
+- Control flow (e.g., `for`, `conditional`),
+- Function calls (e.g., `math.add`, `debug.log`),
+- Database operations (e.g., `db.query`).
+
+Stacks are used to organize and execute a series of steps in a structured manner, often as part of a larger workflow.
+
+# input
+
+```xs
+input {
+  text username filters=trim {
+    description = "User's login name"
+    sensitive = false
+  }
+  int age? {
+    description = "User's age (optional)"
+  }
+}
+```
+
+An `input` block defines the parameters expected by a `query` or `function`. It includes:
+
+- Fields with their data types (e.g., `text`, `int`),
+- Optional status (marked with `?`),
+- Filters (e.g., `trim`) to process the input,
+- Metadata like `description` for clarity or `sensitive` to mark private data.
+
+here is the list of accepted types:
+
+- int
+- timestamp
+- text
+- uuid
+- vector
+- date
+- bool
+- decimal
+- email
+- password
+- json
+- image
+- video
+- audio
+- attachment
+
+Inputs specify the data that a query or function can receive and work with, such as user-provided values in an API request.
+
+# schema
+
+```xs
+schema {
+  int customer_id
+  text full_name filters=trim {
+    description = "Customer's full name"
+  }
+  email contact_email filters=trim|lower {
+    description = "Customer's email address"
+    sensitive = true
+  }
+  timestamp registered_at?=now
+}
+```
+
+A `schema` block, used within a `table` file, defines the structure of a database table. It includes:
+
+- Fields with their data types (e.g., `int`, `text`, `email`),
+- Optional status (marked with `?`),
+- Default values (e.g., `?=now`),
+- Filters (e.g., `trim|lower`) to process field values,
+- Metadata like `description` for clarity or `sensitive` to mark private fields.
+
+Schemas outline the columns and their properties for storing data in a table.
+
+# response
+
+```xs
+response {
+  value = $user_data
+}
+```
+
+A `response` block, used within a `query` or `function`, specifies the data to return as the result of the operation. The `value` parameter defines the output, which can be a variable (e.g., `$user_data`), a literal, or an expression. Responses determine what data is sent back to the caller, such as API response data or a function’s return value.
+
+Note that the response block does not accept a description field.
+
+# schedule
+
+```xs
+schedule {
+  events = [
+    {starts_on: 2025-01-01 09:00:00+0000, freq: 86400},
+    {starts_on: 2025-01-02 09:00:00+0000, freq: 604800, ends_on: 2025-12-31 09:00:00+0000}
+  ]
+}
+```
+
+A `schedule` block, used within a `task` file, defines when the task should run. It includes an `events` array with:
+
+- `starts_on`: The start date and time (e.g., `2025-01-01 09:00:00+0000`),
+- `freq`: The frequency in seconds for recurring tasks (e.g., `86400` for daily, `604800` for weekly),
+- `ends_on`: An optional end date for recurring tasks (e.g., `2025-12-31 09:00:00+0000`).
+
+Schedules automate task execution at specified intervals or times.
+
+# table
+
+```xs
+table customer {
+  auth = true
+  security = {
+    guid: "a1b2c3d4e5f6"
+  }
+  schema {
+    int id
+    text name filters=trim {
+      description = "Customer's full name"
+    }
+    email email filters=trim|lower {
+      description = "Customer's email address"
+      sensitive = true
+    }
+    timestamp signup_date?=now
+    bool is_active?=true
+  }
+  index = [
+    {type: "primary", field: [{name: "id"}]}
+    {type: "gin", field: [{name: "xdo", op: "jsonb_path_op"}]}
+    {type: "btree", field: [{name: "email", op: "desc"}]}
+  ]
+}
+```
+
+A `table` file defines the schema for a database table (e.g., `customer`). It includes:
+
+- An `auth` flag to enable/disable authentication for the table,
+- A `security` block with a `guid` for access control,
+- A `schema` block listing fields with their data types (e.g., `int`, `text`, `email`), optional status (marked with `?`), default values (e.g., `?=now`), filters (e.g., `trim|lower`), and metadata like `description` or `sensitive`,
+- An `index` block defining indexes for efficient querying (e.g., `primary` for the `id` field, `unique` for the `email` field).
+
+Tables are used to structure and store data in a database, such as customer information.
+
+# query
+
+```xs
+query products verb=GET {
+  input {
+    text category filters=trim {
+      description = "Product category to filter by"
+      sensitive = false
+    }
+  }
+  stack {
+    var $category_filter {
+      value = $input.category
+    }
+    conditional {
+      if (($category_filter|strlen) > 0) {
+        db.query product {
+          search = ($db.product.category|to_lower) == ($category_filter|to_lower)
+        } as $filtered_products
+      }
+      else {
+        db.query product {
+        } as $filtered_products
+      }
+    }
+  }
+  response {
+    value = $filtered_products
+  }
+}
+```
+
+A `query` file defines an API endpoint to handle HTTP requests (e.g., GET, POST). It includes:
+
+- A path (e.g., `products`) and HTTP method (`verb`),
+- An `input` block to define request parameters (e.g., `category`), which can have filters (e.g., `trim`) and metadata like `description` or `sensitive`,
+- A `stack` block containing the logic to process the request (e.g., querying a database, applying conditions),
+- A `response` block specifying the data to return (e.g., `$filtered_products`).
+
+Queries are essential for creating API endpoints to retrieve or manipulate data, such as fetching products by category.
+
+# function
+
+```xs
+function maths/calculate_total {
+  input {
+    int quantity?
+    int price_per_item?
+  }
+  stack {
+    var $total {
+      value = 0
+    }
+    conditional {
+      if (($input.quantity == null) || ($input.price_per_item == null)) {
+        throw {
+          name = "InvalidInputError"
+          value = "Quantity and price must be provided"
+        }
+      }
+      else {
+        math.mul $total {
+          value = $input.quantity
+        }
+        math.mul $total {
+          value = $input.price_per_item
+        }
+      }
+    }
+  }
+  response {
+    value = $total
+  }
+}
+```
+
+A `function` file defines a reusable custom function that can be called elsewhere in your script. It includes:
+
+- A name (e.g., `"calculate_total"`) to identify the function,
+- An `input` block to define parameters (e.g., `quantity` and `price_per_item`), which can be optional (marked with `?`),
+- A `stack` block containing the logic to execute (e.g., calculations, conditionals),
+- A `response` block specifying the return value (e.g., `$total`).
+
+Functions are ideal for encapsulating logic, such as calculating a total cost, that can be reused across scripts.
+
+# task
+
+```xs
+task "daily_report" {
+  stack {
+    db.query sales {
+      description = "Fetch daily sales data"
+    } as $daily_sales
+  }
+  schedule {
+    events = [
+      {starts_on: 2025-01-01 08:00:00+0000, freq: 86400}
+    ]
+  }
+}
+```
+
+A `task` file defines a scheduled job that runs automatically at specified times. It includes:
+
+- A name (e.g., `"daily_report"`) to identify the task,
+- A `stack` block containing the actions to execute (e.g., querying a database),
+- A `schedule` block with `events` to define when the task runs, including:
+  - `starts_on`: The start date and time (e.g., `2025-01-01 08:00:00+0000`),
+  - `freq`: The frequency in seconds for recurring tasks (e.g., `86400` for daily),
+  - `ends_on`: An optional end date for recurring tasks (not used here).
+
+Tasks are ideal for automating recurring operations like generating reports or syncing data.
+
+# api.lambda
+
+```xs
+api.lambda {
+  code = """
+    console.log("Running custom typescript code")
+    return $input.value > 10 ? true : false;
+  timeout = 10
+  """
+} as $result
+```
+
+allows you to run provided `code` in Javascript or Typescript in a sandboxed environment. Maximum execution time is `timeout` seconds.
+
+The lambda function has access to your function stack context like `$input`, `$var`, `$auth` and `$env`.
+
+The result of the execution is stored in `as $result` variable and is the returned value of the code.
+
+# api.request
+
+```xs
+api.request {
+  url = "https://api.example.com/users"
+  method = "GET"
+  params = {}|set:"user_id":"123"
+  headers = []|push:"Authorization: Bearer token123"
+  timeout = 30
+} as $user_response
+```
+
+Sends an HTTP request to a specified URL and retrieves the response. It supports various HTTP methods, query parameters, custom headers, and a timeout to limit execution time. The response is stored in the variable specified by `as`.
+
+# api.stream
+
+```xs
+api.stream {
+  value = $processed_results
+}
+```
+
+Streams data back to the client when the API response type is set to `'Stream'`. This is useful for real-time data delivery, such as in live updates or large data transfers.
+
+# api.realtime_event
+
+```xs
+api.realtime_event {
+  channel = "notifications_channel"
+  data = $alert_message
+  auth_table = "users"
+  auth_id = "user_789"
+}
+```
+
+Sends a real-time event over a specified channel, enabling live updates in applications. It includes a data payload and optional authentication details to control access.
+
+# var
+
+```xs
+var $name {
+  value = "value"
+}
+```
+
+defines a variable with the name `$name` and the value `"value"`. The value can be a string, number, boolean, or an object followed by filters.
+
+# var.update
+
+```xs
+var.update $name {
+  value = "value"
+}
+```
+
+updates the value of the variable with the name `$name` to `"value"`. The value can be a string, number, boolean, or an object followed by filters.
+
+# array.find
+
+```xs
+array.find $customer_ages if ($this > 18) as $first_adult_age
+```
+
+Searches an array and returns the first element that meets the specified condition. If no element satisfies it, `null` is returned. The result is stored in the variable defined by `as`.
+
+# array.push
+
+```xs
+array.push $shopping_cart {
+  value = "oranges"
+  disabled = false
+  description = "Add oranges to cart"
+}
+```
+
+Appends a new element to the end of an array. It accepts a `value` to add, with optional `disabled` (to skip execution) and `description` (for context or logging).
+
+# array.unshift
+
+```xs
+array.unshift $priority_tasks {
+  value = "urgent meeting"
+}
+```
+
+Inserts a new element at the beginning of an array, shifting existing elements to higher indexes.
+
+# array.shift
+
+```xs
+array.shift $waiting_list as $next_customer
+```
+
+Removes and returns the first element of an array, shortening the array by one. The removed element is stored in the variable specified by `as`.
+
+# array.pop
+
+```xs
+array.pop $completed_tasks as $last_finished_task
+```
+
+Removes and returns the last element of an array, reducing its length by one. The removed element is stored in the variable defined by `as`.
+
+# array.merge
+
+```xs
+array.merge $active_users {
+  value = $new_users
+}
+```
+
+Combines another array or a single value into the target array, appending all elements from the provided `value`.
+
+# array.find_index
+
+```xs
+array.find_index $sale_prices if ($this < 20) as $first_discount_index
+```
+
+Returns the index of the first element that satisfies the condition. If no match is found, it returns `-1`. The result is stored in the variable specified by `as`.
+
+# array.has
+
+```xs
+array.has $team_roles if ($this == "manager") {
+  disabled = false
+  description = "Verify manager role"
+} as $has_manager
+```
+
+Checks if at least one element in the array meets the condition, returning `true` if so, `false` otherwise. The result is stored in the `as` variable. Optional `disabled` and `description` parameters control execution and add context.
+
+# array.every
+
+```xs
+array.every $exam_scores if ($this >= 70) as $all_passed
+```
+
+Tests whether every element in the array satisfies the condition, returning `true` if they all do, `false` if any fail. The result is stored in the `as` variable.
+
+# array.filter
+
+```xs
+array.filter $temperatures if ($this > 32) as $above_freezing
+```
+
+Creates a new array containing only the elements that meet the condition. The filtered result is stored in the variable specified by `as`.
+
+# array.filter_count
+
+```xs
+array.filter_count $survey_responses if ($this == "yes") as $yes_count
+```
+
+Counts how many elements in the array satisfy the condition. The total is stored in the variable defined by `as`.
+
+Below is the documentation for the XanoScript functions related to database operations and control flow, as requested in your query. Each entry follows the style of the existing documentation, providing a code snippet example and a brief explanation of what the function does. The examples use meaningful variable names to illustrate practical use cases.
+
+# conditional
+
+```xs
+conditional {
+  if ($user_age > 18) {
+    debug.log {
+      value = "Adult user"
+    }
+  }
+  elseif ($user_age < 18) {
+    debug.log {
+      value = "Minor user"
+    }
+  }
+  else {
+    debug.log {
+      value = "User age not specified"
+    }
+  }
+}
+```
+
+Controls the flow of the script based on specified conditions, allowing different code blocks to execute depending on whether the conditions are true or false. It functions like an if-else statement, checking each condition in sequence and running the corresponding block.
+
+# continue
+
+```xs
+foreach $users as $user {
+  if ($user.age < 18) {
+    continue
+  }
+  debug.log {
+    value = $user.name + " is an adult"
+  }
+}
+```
+
+Skips the current iteration of a loop and moves to the next one. This is useful for bypassing specific items in a loop based on a condition, such as skipping users under 18 in this example.
+
+# db.add
+
+```xs
+db.add user {
+  data = {
+    name: $input.name,
+    email: $input.email
+  }
+} as $new_user
+```
+
+Inserts a new record into a specified database table (e.g., `user`) with the provided data fields. The new record is stored in the variable specified by `as`, here `$new_user`, for further use.
+
+# db.add_or_edit
+
+```xs
+db.add_or_edit user {
+  field_name = "email"
+  field_value = $input.email
+  data = {
+    name: $input.name,
+    category: $input.category
+  }
+} as $user_record
+```
+
+Adds a new record to a database table (e.g., `user`) or updates an existing one based on a specified field (e.g., `email`) and its value (e.g., `$input.email`). The data block specifies the fields to add or update, and the resulting record is stored in `$user_record`.
+
+# db.del
+
+```xs
+db.del comment {
+  field_name = "id"
+  field_value = $input.commentId
+}
+```
+
+Removes a record from a database table (e.g., `comment`) based on a specified field (e.g., `id`) and its value (e.g., `$input.commentId`). This deletes the matching record.
+
+# db.direct_query
+
+```xs
+db.direct_query {
+  code = "SELECT * FROM users WHERE users.email = ?"
+  response_type = "list"
+  arg = $input.email
+} as $query_results
+```
+
+Executes a raw SQL query directly on the database, using placeholders (`?`) for parameters provided via `arg`. The `response_type` specifies whether to return a `list` or `single` result. The output is stored in the variable defined by `as`, here `$query_results`.
+
+# db.edit
+
+```xs
+db.edit user {
+  field_name = "email"
+  field_value = $input.email
+  data = {
+    category: $input.category
+  }
+} as $updated_user
+```
+
+Updates an existing record in a database table (e.g., `user`) identified by a field (e.g., `email`) and its value (e.g., `$input.email`). The `data` block specifies the fields to update, and the revised record is stored in `$updated_user`.
+
+# db.get
+
+```xs
+db.get user {
+  field_name = "email"
+  field_value = $input.email
+} as $user
+```
+
+Retrieves a single record from a database table (e.g., `user`) based on a specified field (e.g., `email`) and its value (e.g., `$input.email`). The fetched record is stored in the variable specified by `as`, here `$user`.
+
+# db.has
+
+```xs
+db.has user {
+  field_name = "email"
+  field_value = $input.email
+} as $user_exists
+```
+
+Checks if a record exists in a database table (e.g., `user`) based on a specified field (e.g., `email`) and its value (e.g., `$input.email`). Returns `true` if found, `false` otherwise, stored in `$user_exists`.
+
+# db.query
+
+```xs
+db.query client {
+  description = "Fetch client details by name"
+  search = $db.client.name ilike $input.search
+  return_list = {
+    paging : {
+      page    : 1
+      per_page: 25
+      totals  : true
+      offset  : 0
+      metadata: true
+    }
+    sorting: [{sort: "client.name", order: "asc"}]
+  }
+
+} as $matched_client
+```
+
+Retrieves multiple records from a database table (e.g., `user`) based on a search condition. Here, it matches records where the lowercase email equals the lowercase input email. The results are stored in `$users`.
+
+```xs
+db.query availability {
+  external_simple = {
+    page    : $input.page
+    per_page: 20
+    search  : $input.search
+    sort    : "created_at"
+  }
+
+} as availability
+```
+
+Retrieves multiple records from a database table (e.g., `availability`) based on a search condition. Here, it matches records where the search term matches the input search term. The results are stored in `$availability`.
+
+# db.schema
+
+```xs
+db.schema user {
+  path = "email"
+} as $email_schema
+```
+
+Returns the schema of a database table (e.g., `user`) or a specific field within it (e.g., `email` via `path`). The schema information is stored in the variable specified by `as`, here `$email_schema`.
+
+# db.set_datasource
+
+```xs
+db.set_datasource {
+  value = "test"
+}
+```
+
+Changes the datasource for all subsequent database queries in the current script execution to the specified value (e.g., `"test"`). This affects all database operations that follow.
+
+# db.transaction
+
+```xs
+db.transaction {
+  description = "Update user and log action"
+  stack {
+    db.update user { ... }
+    db.add log { ... }
+  }
+}
+```
+
+Executes a series of database operations (e.g., updating a user and adding a log entry) within a single transaction. Ensures atomicity—either all operations succeed, or none are applied. The `description` provides context.
+
+# db.truncate
+
+```xs
+db.truncate user {
+  reset = true
+}
+```
+
+Deletes all records from a specified database table (e.g., `user`). If `reset = true`, it also resets any auto-incrementing IDs, effectively clearing the table and starting fresh.
+
+# db.external.mssql.direct_query
+
+```xs
+db.external.mssql.direct_query {
+  code = "SELECT * FROM orders WHERE orders.total > ?"
+  response_type = "list"
+  connection_string = "mssql://db_user:db_password@server.com:1433/sales_db?sslmode=disabled"
+  arg = $input.min_total
+} as $large_orders
+```
+
+Executes a SQL query directly on an external Microsoft SQL Server database. The `code` parameter contains the SQL statement, and `response_type` specifies whether it returns a `list` of records or a `single` record. The `connection_string` provides access to the database, and `arg` supplies values for placeholders (e.g., `?`) in the query. Results are stored in the variable defined by `as`, here `$large_orders`.
+
+# db.external.mysql.direct_query
+
+```xs
+db.external.mysql.direct_query {
+  code = "SELECT * FROM products WHERE products.category = ?"
+  response_type = "list"
+  connection_string = "mysql://db_user:db_password@host.com:3306/inventory_db?sslmode=disabled"
+  arg = $input.category
+} as $category_products
+```
+
+Runs a SQL query directly on an external MySQL database. The `response_type` determines if the result is a `list` or a `single` record. The `connection_string` specifies the database connection, and `arg` provides values for query placeholders. The output is stored in the `as` variable, here `$category_products`.
+
+# db.external.oracle.direct_query
+
+```xs
+db.external.oracle.direct_query {
+  code = "SELECT * FROM employees WHERE employees.department = ?"
+  response_type = "list"
+  connection_string = "oracle://db_user:db_password@server.com:1521/hr_db"
+  arg = $input.department
+} as $department_employees
+```
+
+Directly executes a SQL query on an external Oracle database. The `response_type` sets whether the query returns a `list` or a `single` record. The `connection_string` defines the database connection, and `arg` supplies placeholder values. Results are stored in the variable specified by `as`, here `$department_employees`.
+
+# db.external.postgres.direct_query
+
+```xs
+db.external.postgres.direct_query {
+  code = "SELECT * FROM customers WHERE customers.last_purchase > ?"
+  response_type = "list"
+  connection_string = "postgres://db_user:db_password@host.com:5432/shop_db?sslmode=prefer"
+  arg = $input.date_threshold
+} as $recent_customers
+```
+
+Performs a SQL query directly on an external PostgreSQL database. The `response_type` indicates if the result is a `list` or a `single` record. The `connection_string` establishes the database connection, and `arg` provides values for placeholders. The results are stored in the `as` variable, here `$recent_customers`.
+
+# debug.stop
+
+```xs
+debug.stop {
+  value = $some_var
+}
+```
+
+This function stops the script’s execution at the point where it’s called and sends the specified `value` to the debugger. It’s a handy tool for troubleshooting, allowing you to inspect the contents of a variable (like `$some_var`) during development to ensure your script is working as expected.
+
+# foreach
+
+```xs
+foreach ($numbers_list) {
+  each as $item {
+    var.update $sum {
+      value = $sum + $item
+    }
+  }
+}
+```
+
+**Example with a predefined list**:
+
+```xs
+foreach ([1, 2, 3, 4]) {
+  each as $item {
+    var.update $sum {
+      value = $sum + $item
+    }
+  }
+}
+```
+
+The `foreach` function loops through every item in a list (e.g., an array like `$numbers_list` or `[1, 2, 3, 4]`). The `each as` clause assigns the current item to a variable (e.g., `$item`), which you can use inside the loop to perform actions on each element.
+
+# for
+
+```xs
+for (10) {
+  description = "Repeat this 10 times, with $index counting from 0 to 9"
+  each as $index {
+    debug.log {
+      value = $index + 1
+    }
+  }
+}
+```
+
+This function creates a loop that runs a set number of times (e.g., 10). The `each as` clause provides a counter variable (e.g., `$index`), which starts at 0 and increases by 1 each iteration, up to one less than the specified number (e.g., 0 through 9 for a count of 10).
+
+# function.run
+
+```xs
+function.run add_fn {
+  input = { a: $input.a, b: $input.b }
+} as $func_result
+```
+
+The `function.run` function calls a custom function (e.g., `add_fn`) and passes it the data specified in the `input` parameter (e.g., an object with `a` and `b` values). The result of the function is stored in the variable named after `as` (e.g., `$func_result`), making it available for further use in your script.
+
+# group
+
+```xs
+group {
+  description = "your group description"
+  stack {
+    debug.log {
+      value = "Action 1"
+    }
+  }
+}
+```
+
+The `group` function organizes a set of actions into a logical block that can be collapsed in the user interface for better readability. The `description` field labels the group (e.g., "group description"), and the `stack` contains the actions you want to group together.
+
+# math.sub
+
+```xs
+math.sub $total_cost {
+  value = $discount_amount
+}
+```
+
+Subtracts the specified `value` (e.g., `$discount_amount`) from the variable (e.g., `$total_cost`) and updates the variable with the result. This is ideal for scenarios like reducing a total by a discount.
+
+**NOTE**: math.sub does not return a value; it mutates the variable directly.
+
+# math.mul
+
+```xs
+math.mul $base_price {
+  value = $tax_rate
+}
+```
+
+Multiplies the variable (e.g., `$base_price`) by the specified `value` (e.g., `$tax_rate`) and stores the product back into the variable. Use this to calculate values like a price with tax applied.
+
+**NOTE**: math.mul does not return a value; it mutates the variable directly.
+
+# math.div
+
+```xs
+math.div $total_time {
+  value = $num_tasks
+}
+```
+
+Divides the variable (e.g., `$total_time`) by the specified `value` (e.g., `$num_tasks`), updating the variable with the quotient. This is useful for finding averages, such as time per task.
+
+**NOTE**: math.div mutates the value, it doesn't have a return value.
+
+# math.bitwise.xor
+
+```xs
+math.bitwise.xor $flags {
+  value = $toggle_bit
+}
+```
+
+Performs a bitwise XOR operation between the variable (e.g., `$flags`) and the specified `value` (e.g., `$toggle_bit`), storing the result in the variable. This is handy for toggling specific bits in a binary flag.
+
+**NOTE**: math.bitwise.xor mutates the value, it doesn't have a return value.
+
+# math.bitwise.or
+
+```xs
+math.bitwise.or $permissions {
+  value = $new_permission
+}
+```
+
+Applies a bitwise OR operation between the variable (e.g., `$permissions`) and the specified `value` (e.g., `$new_permission`), updating the variable with the result. Commonly used to add permissions to an existing set.
+
+**NOTE**: math.bitwise.or mutates the value, it doesn't have a return value.
+
+# math.bitwise.and
+
+```xs
+math.bitwise.and $status_flags {
+  value = $check_bit
+}
+```
+
+Executes a bitwise AND operation between the variable (e.g., `$status_flags`) and the specified `value` (e.g., `$check_bit`), saving the result in the variable. This is useful for checking if a particular bit is set.
+
+**NOTE**: math.bitwise.and mutates the value, it doesn't have a return value.
+
+# math.add
+
+```xs
+math.add $cart_total {
+  value = $item_price
+}
+```
+
+Adds the specified `value` (e.g., `$item_price`) to the variable (e.g., `$cart_total`) and updates the variable with the sum. Perfect for accumulating values, like adding an item’s cost to a cart total.
+
+**NOTE**: math.add mutates the value, it doesn't have a return value.
+
+# redis.unshift
+
+```xs
+redis.unshift {
+  key = "task_list"
+  value = "urgent_task"
+} as $new_list_length
+```
+
+Adds an element to the beginning of a Redis list specified by `key`. The `value` is the element to add, and the new length of the list is stored in the variable defined by `as`, here `$new_list_length`.
+
+# redis.incr
+
+```xs
+redis.incr {
+  package_key = "1"
+  key = "visit_counter"
+  by = 1
+} as $new_count
+```
+
+Increments a numeric value in Redis at the specified `key` within a `package_key` namespace by the amount given in `by`. The updated value is stored in the variable specified by `as`, here `$new_count`.
+
+# redis.remove
+
+```xs
+redis.remove {
+  key = "user_list"
+  value = "inactive_user"
+  count = 1
+}
+```
+
+Removes a specified number (`count`) of occurrences of `value` from a Redis list identified by `key`. This is useful for cleaning up lists by removing specific elements.
+
+# redis.del
+
+```xs
+redis.del {
+  key = "session_data"
+}
+```
+
+Deletes a key and its associated value from Redis, specified by `key`. This clears the cache entry, freeing up space.
+
+# redis.push
+
+```xs
+redis.push {
+  package_key = "1"
+  key = "message_queue"
+  value = "new_message"
+} as $queue_length
+```
+
+Adds an element to the end of a Redis list identified by `key` within a `package_key` namespace. The `value` is the element to add, and the new list length is stored in the variable defined by `as`, here `$queue_length`.
+
+# redis.ratelimit
+
+```xs
+redis.ratelimit {
+  key = "api_requests"
+  max = 100
+  ttl = 60
+  error = "Rate limit exceeded"
+} as $rate_limit_status
+```
+
+Enforces rate limiting on requests using Redis, tracking usage with `key`. It allows up to `max` requests within a `ttl` time window (in seconds). If exceeded, the `error` message is used, and the result (e.g., success or failure) is stored in `$rate_limit_status`.
+
+# redis.range
+
+```xs
+redis.range {
+  key = "event_log"
+  start = 0
+  stop = 5
+} as $recent_events
+```
+
+Retrieves a range of elements from a Redis list specified by `key`, from the `start` index to the `stop` index (inclusive). The result is stored in the variable defined by `as`, here `$recent_events`.
+
+# redis.decr
+
+```xs
+redis.decr {
+  key = "stock_count"
+  by = 1
+} as $new_stock
+```
+
+Decrements a numeric value in Redis at the specified `key` by the amount given in `by`. The updated value is stored in the variable specified by `as`, here `$new_stock`.
+
+# redis.pop
+
+```xs
+redis.pop {
+  key = "task_queue"
+} as $last_task
+```
+
+Removes and returns the last element from a Redis list specified by `key`. The removed element is stored in the variable defined by `as`, here `$last_task`.
+
+# redis.get
+
+```xs
+redis.get {
+  key = "user_session"
+} as $session_data
+```
+
+Retrieves the value associated with a `key` from Redis. The result is stored in the variable specified by `as`, here `$session_data`.
+
+# redis.set
+
+```xs
+redis.set {
+  key = "user_token"
+  data = "token123"
+  ttl = 3600
+}
+```
+
+Sets a `key` in Redis to the specified `data` value, with an optional `ttl` (time-to-live in seconds) to control how long the key persists before expiring.
+
+# redis.has
+
+```xs
+redis.has {
+  key = "user_token"
+} as $token_exists
+```
+
+Checks if a `key` exists in Redis, returning `true` if it does, `false` otherwise. The result is stored in the variable specified by `as`, here `$token_exists`.
+
+# redis.shift
+
+```xs
+redis.shift {
+  key = "message_queue"
+} as $first_message
+```
+
+Removes and returns the first element from a Redis list specified by `key`. The removed element is stored in the variable defined by `as`, here `$first_message`.
+
+# redis.count
+
+```xs
+redis.count {
+  key = "message_queue"
+} as $queue_size
+```
+
+Returns the number of elements in a Redis list specified by `key`. The count is stored in the variable defined by `as`, here `$queue_size`.
+
+# redis.keys
+
+```xs
+redis.keys {
+  search = "user_*"
+} as $user_keys
+```
+
+Retrieves a list of Redis keys that match the specified `search` pattern (e.g., `user_*` for all keys starting with "user\_"). The matching keys are stored in the variable specified by `as`, here `$user_keys`.
+
+# object.keys
+
+```xs
+object.keys {
+  value = $user_data
+} as $user_data_keys
+```
+
+Retrieves the property keys of an object (e.g., `$user_data`) as an array. The resulting array of keys is stored in the variable specified by `as`, here `$user_data_keys`.
+
+# object.values
+
+```xs
+object.values {
+  value = $product_info
+} as $product_values
+```
+
+Extracts the values of an object’s properties (e.g., `$product_info`) into an array. The array of values is stored in the variable defined by `as`, here `$product_values`.
+
+# object.entries
+
+```xs
+object.entries {
+  value = $settings
+} as $settings_pairs
+```
+
+Returns an array of key-value pairs from an object (e.g., `$settings`), where each pair is an array containing the key and its corresponding value. The result is stored in the variable specified by `as`, here `$settings_pairs`.
+
+# precondition
+
+```xs
+precondition ($user_age >= 18) {
+  error_type = "standard"
+  error = "User must be 18 or older"
+}
+```
+
+Throws an exception if the specified condition (e.g., `$user_age >= 18`) evaluates to `false`. The `error_type` defines the type of error, and `error` provides a custom message to describe the failure.
+
+# return
+
+```xs
+return {
+  value = $calculation_result
+}
+```
+
+Halts the execution of the current function and returns the specified `value` (e.g., `$calculation_result`) as the function’s output. This allows early termination with a result.
+
+# security.create_auth_token
+
+```xs
+security.create_auth_token {
+    dbtable = "users"
+    extras = { "role": "admin" }
+    expiration = 86400
+    id = $user_id
+} as $auth_token
+```
+
+Generates an encrypted authentication token linked to a database table (e.g., `users`). The `extras` parameter adds optional data, `expiration` sets validity in seconds (e.g., 86400 for 24 hours), and `id` identifies the user. The token is stored in the variable defined by `as`, here `$auth_token`.
+
+# security.create_uuid
+
+```xs
+security.create_uuid as $unique_id
+```
+
+Generates a Universally Unique Identifier (UUID), a random 128-bit value, stored in the variable defined by `as`, here `$unique_id`.
+
+# security.encrypt
+
+```xs
+security.encrypt {
+    data = $sensitive_data
+    algorithm = "aes-256-cbc"
+    key = "encryption_key"
+    iv = "init_vector"
+} as $encrypted_data
+```
+
+Encrypts a payload into binary data using a specified `algorithm` (e.g., `aes-256-cbc`), `key`, and initialization vector (`iv`). The encrypted result is stored in the variable defined by `as`, here `$encrypted_data`.
+
+# security.create_curve_key
+
+```xs
+security.create_curve_key {
+    curve = "P-256"
+    format = "object"
+} as $crypto_key
+```
+
+Generates a cryptographic key using an elliptic curve type (`P-256`, `P-384`, or `P-521`). The `format` parameter sets the output type (e.g., `object`), and the key is stored in the variable defined by `as`, here `$crypto_key`.
+
+# security.random_bytes
+
+```xs
+security.random_bytes {
+    length = 16
+} as $random_bytes
+```
+
+Generates a string of random bytes with the specified `length` (e.g., 16), stored in the variable defined by `as`, here `$random_bytes`.
+
+# security.create_password
+
+```xs
+security.create_password {
+    character_count = 12
+    require_lowercase = true
+    require_uppercase = true
+    require_digit = true
+    require_symbol = false
+    symbol_whitelist = ""
+} as $generated_password
+```
+
+Generates a random password based on rules like `character_count` (e.g., 12) and requirements for lowercase, uppercase, digits, and symbols. The `symbol_whitelist` limits allowed symbols. The password is stored in the variable defined by `as`, here `$generated_password`.
+
+# security.decrypt
+
+```xs
+security.decrypt {
+    data = $encrypted_data
+    algorithm = "aes-256-cbc"
+    key = "encryption_key"
+    iv = "init_vector"
+} as $decrypted_data
+```
+
+Decrypts a payload back to its original form using the specified `algorithm` (e.g., `aes-256-cbc`), `key`, and initialization vector (`iv`). The decrypted result is stored in the variable defined by `as`, here `$decrypted_data`.
+
+# security.jwe_decode
+
+```xs
+security.jwe_decode {
+    token = $jwe_token
+    key = "decryption_key"
+    check_claims = { "iss": "my_app" }
+    key_algorithm = "A256KW"
+    content_algorithm = "A256GCM"
+    timeDrift = 0
+} as $decoded_payload
+```
+
+Decodes a JSON Web Encryption (JWE) token using the `key`, specified `key_algorithm` (e.g., `A256KW`), and `content_algorithm` (e.g., `A256GCM`). Optional `check_claims` validates token claims, and `timeDrift` adjusts time validation. The result is stored in the variable defined by `as`, here `$decoded_payload`.
+
+# security.jws_encode
+
+```xs
+security.jws_encode {
+    headers = { "alg": "HS256" }
+    claims = { "user_id": "123" }
+    key = "signing_key"
+    signature_algorithm = "HS256"
+    ttl = 3600
+} as $signed_token
+```
+
+Encodes a payload as a JSON Web Signature (JWS) token with `headers`, `claims`, and a `key`. The `signature_algorithm` (e.g., `HS256`) signs the token, and `ttl` sets its validity in seconds (e.g., 3600). The token is stored in the variable defined by `as`, here `$signed_token`.
+
+# security.jws_decode
+
+```xs
+security.jws_decode {
+    token = $jws_token
+    key = "signing_key"
+    check_claims = { "user_id": "123" }
+    signature_algorithm = "HS256"
+    timeDrift = 0
+} as $verified_payload
+```
+
+Decodes a JSON Web Signature (JWS) token using the `key` and `signature_algorithm` (e.g., `HS256`). Optional `check_claims` verifies token claims, and `timeDrift` adjusts time validation. The payload is stored in the variable defined by `as`, here `$verified_payload`.
+
+# security.jwe_encode
+
+```xs
+security.jwe_encode {
+    headers = { "alg": "A256KW" }
+    claims = { "data": "secret" }
+    key = "encryption_key"
+    key_algorithm = "A256KW"
+    content_algorithm = "A256GCM"
+    ttl = 0
+} as $encrypted_token
+```
+
+Encodes a payload as a JSON Web Encryption (JWE) token with `headers`, `claims`, and a `key`. The `key_algorithm` (e.g., `A256KW`) and `content_algorithm` (e.g., `A256GCM`) secure the token, and `ttl` sets its validity (0 for no expiration). The token is stored in the variable defined by `as`, here `$encrypted_token`.
+
+# security.create_secret_key
+
+```xs
+security.create_secret_key {
+    bits = 2048
+    format = "object"
+} as $secret_key
+```
+
+Generates a secret key for digital signatures or symmetric encryption with the specified `bits` (e.g., 2048) and `format` (e.g., `object`). The key is stored in the variable defined by `as`, here `$secret_key`.
+
+# security.random_number
+
+```xs
+security.random_number {
+    min = 1
+    max = 100
+} as $random_value
+```
+
+Generates a random number between `min` and `max` (e.g., 1 to 100), stored in the variable defined by `as`, here `$random_value`.
+
+# security.check_password
+
+```xs
+security.check_password {
+    text_password = $user_input_password
+    hash_password = $stored_password_hash
+} as $is_valid
+```
+
+Verifies if a plain-text password (e.g., `$user_input_password`) matches a hashed password (e.g., `$stored_password_hash`). Returns `true` if they match, `false` otherwise, stored in the variable defined by `as`, here `$is_valid`.
+
+# stream.from_jsonl
+
+```xs
+stream.from_jsonl {
+  value = $jsonl_file
+} as $jsonl_stream
+```
+
+Parses a JSONL (JSON Lines) file resource and streams its row data. The `value` parameter specifies the JSONL file to process, and the resulting stream is stored in the variable defined by `as`, here `$jsonl_stream`.
+
+# storage.create_file_resource
+
+```xs
+storage.create_file_resource {
+  filename = "report.txt"
+  filedata = $report_content
+} as $new_file
+```
+
+Creates a new file with the specified `filename` and `filedata` content. The created file resource is stored in the variable specified by `as`, here `$new_file`, for further use.
+
+# storage.sign_private_url
+
+```xs
+storage.sign_private_url {
+  pathname = "documents/secret.pdf"
+  ttl = 60
+} as $signed_url
+```
+
+Generates a signed URL for a private file at the specified `pathname`, allowing temporary access for a duration defined by `ttl` (in seconds). The signed URL is stored in the variable defined by `as`, here `$signed_url`.
+
+# storage.create_attachment
+
+```xs
+storage.create_attachment  {
+  value = $input.attachment
+  access= "public"
+  filename = "attachment.pdf"
+} as $attachment_metadata
+```
+
+Creates attachment metadata from a file resource specified by `value`, with the given `filename`. The `access` parameter determines if the attachment is `public` or `private`. The metadata is stored in the variable specified by `as`, here `$attachment_metadata`.
+
+# storage.delete_file
+
+```xs
+storage.delete_file {
+  pathname = "temp/data.csv"
+}
+```
+
+Deletes a file from storage at the specified `pathname`. This removes the file permanently from the storage system.
+
+# storage.read_file_resource
+
+```xs
+storage.read_file_resource {
+  value = $input.file
+} as $file_content
+```
+
+Retrieves the raw data from a file resource specified by `value`. The content of the file is stored in the variable defined by `as`, here `$file_content`.
+
+# storage.create_image
+
+```xs
+storage.create_image {
+  value = $input.image
+  access="public"
+  filename = "profile.jpg"
+} as $image_metadata
+```
+
+Creates image metadata from a file resource specified by `value`, with the given `filename`. The `access` parameter sets the image as `public` or `private`. The metadata is stored in the variable specified by `as`, here `$image_metadata`.
+
+# stream.from_csv
+
+```xs
+stream.from_csv {
+  value = $csv_file
+  separator = ","
+  enclosure = "'"
+  escape_char = "'"
+} as $csv_stream
+```
+
+Parses a CSV file resource and streams its row data. The `value` parameter specifies the CSV file, while `separator`, `enclosure`, and `escape_char` define the CSV format. The resulting stream is stored in the variable defined by `as`, here `$csv_stream`.
+
+# stream.from_request
+
+```xs
+stream.from_request {
+  url = "http://example.com/api/v1"
+  method = "GET"
+  params = {}|set:"filter":"active"
+  headers = []|push:"Authorization: Bearer token123"
+  timeout = 15
+  follow_location = true
+} as $api_stream
+```
+
+Converts an external HTTP request into a streaming API response, returning the data as an array. It supports various HTTP methods, query parameters, headers, a `timeout` (in seconds), and an option to `follow_location` for redirects. The stream is stored in the variable specified by `as`, here `$api_stream`.
+
+# switch
+
+```xs
+switch ($user_status) {
+  case ("active") {
+    return {
+      value = "User is active"
+    }
+  } break
+  case ("inactive") {
+    return {
+      value = "User is inactive"
+    }
+  } break
+  default {
+    return {
+      value = "User status unknown"
+    }
+  }
+}
+```
+
+Implements switch-case logic to control script flow based on the value of a variable (e.g., `$user_status`). It evaluates the variable against each `case`, executing the corresponding block if a match is found, or the `default` block if no matches occur.
+
+# text.starts_with
+
+```xs
+text.starts_with $message {
+  value = "Hello"
+} as $starts_with_hello
+```
+
+Checks if a text string (e.g., `$message`) begins with the specified `value` (e.g., `"Hello"`). Returns `true` if it does, `false` otherwise, and stores the result in the variable defined by `as`, here `$starts_with_hello`.
+
+# text.icontains
+
+```xs
+text.icontains $description {
+  value = "error"
+} as $has_error
+```
+
+Performs a case-insensitive check to see if a text string (e.g., `$description`) contains the specified `value` (e.g., `"error"`). Returns `true` if found, `false` otherwise, and stores the result in `$has_error`.
+
+# text.ltrim
+
+```xs
+text.ltrim $user_input {
+  value = " "
+}
+```
+
+Removes leading characters (default is whitespace, or as specified by `value`) from a text string (e.g., `$user_input`). Updates the variable with the trimmed result, useful for cleaning up user input.
+
+# text.rtrim
+
+```xs
+text.rtrim $user_input {
+  value = " "
+}
+```
+
+Removes trailing characters (default is whitespace, or as specified by `value`) from a text string (e.g., `$user_input`). Updates the variable with the trimmed result, ensuring no unwanted trailing characters remain.
+
+# text.append
+
+```xs
+text.append $greeting {
+  value = ", welcome!"
+}
+```
+
+Adds the specified `value` (e.g., `", welcome!"`) to the end of a text string (e.g., `$greeting`). Updates the variable with the new concatenated string, useful for building messages.
+
+# text.istarts_with
+
+```xs
+text.istarts_with $title {
+  value = "intro"
+} as $starts_with_intro
+```
+
+Performs a case-insensitive check to see if a text string (e.g., `$title`) starts with the specified `value` (e.g., `"intro"`). Returns `true` if it does, `false` otherwise, and stores the result in `$starts_with_intro`.
+
+# text.iends_with
+
+```xs
+text.iends_with $filename {
+  value = "pdf"
+} as $ends_with_pdf
+```
+
+Performs a case-insensitive check to see if a text string (e.g., `$filename`) ends with the specified `value` (e.g., `"pdf"`). Returns `true` if it does, `false` otherwise, and stores the result in `$ends_with_pdf`.
+
+# text.ends_with
+
+```xs
+text.ends_with $url {
+  value = ".com"
+} as $is_com_domain
+```
+
+Checks if a text string (e.g., `$url`) ends with the specified `value` (e.g., `".com"`). Returns `true` if it does, `false` otherwise, and stores the result in `$is_com_domain`.
+
+# text.prepend
+
+```xs
+text.prepend $message {
+  value = "Alert: "
+}
+```
+
+Adds the specified `value` (e.g., `"Alert: "`) to the beginning of a text string (e.g., `$message`). Updates the variable with the new concatenated string, useful for adding prefixes.
+
+# text.contains
+
+```xs
+text.contains $log_entry {
+  value = "error"
+} as $has_error
+```
+
+Checks if a text string (e.g., `$log_entry`) contains the specified `value` (e.g., `"error"`). Returns `true` if found, `false` otherwise, and stores the result in `$has_error`.
+
+# text.trim
+
+```xs
+text.trim $user_input {
+  value = " "
+}
+```
+
+Removes characters (default is whitespace, or as specified by `value`) from both the beginning and end of a text string (e.g., `$user_input`). Updates the variable with the trimmed result, ensuring clean text.
+
+# throw
+
+```xs
+throw {
+  name = "ValidationError"
+  value = "Invalid user input provided"
+}
+```
+
+Throws an error and halts the script’s execution immediately. The `name` parameter specifies the error type (e.g., `"ValidationError"`), and `value` provides a custom error message to describe the issue.
+
+# try_catch
+
+```xs
+try_catch {
+  try {
+    function.run divide_fn {
+      input = { a: 10, b: 0 }
+    }
+  }
+  catch {
+    debug.log {
+      value = "Error occurred: division by zero"
+    }
+  }
+  finally {
+    debug.log {
+      value = "Operation completed"
+    }
+  }
+}
+```
+
+Executes a block of code in the `try` section, catching any errors in the `catch` block for error handling (e.g., logging the error). The optional `finally` block runs regardless of success or failure, useful for cleanup tasks.
+
+# util.set_header
+
+```xs
+util.set_header {
+  value = "Set-Cookie: sessionId=e8bb43229de9; HttpOnly; Secure; Domain=foo.example.com"
+  duplicates = "replace"
+}
+```
+
+Adds a header to the response, specified by `value` (e.g., a cookie header). The `duplicates` parameter determines how to handle duplicate headers, such as `"replace"` to overwrite existing ones.
+
+# util.get_env
+
+```xs
+util.get_env as $environment_vars
+```
+
+Retrieves all environment variables available in the script’s context and stores them in the variable specified by `as`, here `$environment_vars`. Useful for accessing system-wide settings.
+
+# util.get_all_input
+
+```xs
+util.get_all_input as $input_data
+```
+
+Captures all parsed input data sent to the script’s context and stores it in the variable specified by `as`, here `$input_data`. This provides a structured view of input parameters.
+
+# util.get_input
+
+```xs
+util.get_input as $raw_input
+```
+
+Retrieves the raw, unparsed input data for the request and stores it in the variable specified by `as`, here `$raw_input`. This is useful for accessing the original request data before processing.
+
+# util.sleep
+
+```xs
+util.sleep {
+  value = 5
+}
+```
+
+Pauses script execution for the specified number of seconds in `value` (e.g., 5 seconds). This can be used to introduce delays between operations.
+
+# util.ip_lookup
+
+```xs
+util.ip_lookup {
+  value = "123.234.99.22"
+} as $location
+```
+
+Retrieves the geographic location of an IP address specified in `value`. The location data (e.g., city, country) is stored in the variable defined by `as`, here `$location`.
+
+# util.geo_distance
+
+```xs
+util.geo_distance {
+  latitude_1 = 40.71
+  longitude_1 = 74
+  latitude_2 = 48.86
+  longitude_2 = 2.35
+} as $distance
+```
+
+Calculates the distance between two geographic points, specified by their `latitude_1`, `longitude_1` (first point) and `latitude_2`, `longitude_2` (second point). The computed distance is stored in the variable defined by `as`, here `$distance`.
+
+# while
+
+```xs
+while ($retry_count < 5) {
+  each {
+    var.update $retry_count {
+      value = $retry_count + 1
+    }
+  }
+}
+```
+
+Continuously loops through a block of code as long as the specified condition (e.g., `$retry_count < 5`) evaluates to `true`. The `each` block contains the actions to repeat until the condition becomes `false`.
+
+# zip.create_archive
+
+```xs
+zip.create_archive {
+  filename = "backup.zip"
+} as $zip_archive
+```
+
+Creates a new compressed zip archive with the specified `filename`. The created zip file resource is stored in the variable defined by `as`, here `$zip_archive`, for further use.
+
+# zip.add_to_archive
+
+```xs
+zip.add_to_archive {
+  file = $input.file
+  zip = $zip_archive
+}
+```
+
+Adds a file (specified by `file`) to an existing zip archive (specified by `zip`). This updates the zip archive with the new file content.
+
+# zip.delete_from_archive
+
+```xs
+zip.delete_from_archive {
+  filename = $input.file
+  zip = $input.file
+}
+```
+
+Removes a file (specified by `filename`) from an existing zip archive (specified by `zip`). This deletes the file from the archive without affecting other contents.
+
+# zip.extract
+
+```xs
+zip.extract {
+  zip = $zip_archive
+} as $extracted_files
+```
+
+Extracts the contents of a zip archive (specified by `zip`) into individual files. The extracted files are stored in the variable defined by `as`, here `$extracted_files`.
+
+# zip.view_contents
+
+```xs
+zip.view_contents {
+  zip = $input.file
+} as $archive_contents
+```
+
+Lists the contents of a zip archive (specified by `zip`), providing details such as file names within the archive. The list is stored in the variable defined by `as`, here `$archive_contents`.
+
+# cloud.azure.storage.sign_url
+
+```xs
+cloud.azure.storage.sign_url {
+    account_name = "my_storage_account"
+    account_key = "my_secret_key"
+    container_name = "documents"
+    path = "reports/annual.pdf"
+    ttl = 300
+} as $document_access_url
+```
+
+Generates a signed URL for securely accessing a blob in Azure Blob Storage. The URL remains valid for the duration specified by `ttl` (in seconds), allowing temporary access to the file, and is stored in a variable for later use.
+
+# cloud.aws.s3.sign_url
+
+```xs
+cloud.aws.s3.sign_url {
+    bucket = "company_assets"
+    region = "us-east-1"
+    key = "my_aws_key"
+    secret = "my_aws_secret"
+    file_key = "images/logo.png"
+    ttl = 300
+} as $logo_access_url
+```
+
+Creates a signed URL for accessing an object in an AWS S3 bucket, providing temporary access for the time set by `ttl` (in seconds). The URL is stored in the specified variable.
+
+# cloud.aws.s3.list_directory
+
+```xs
+cloud.aws.s3.list_directory {
+    bucket = "media_library"
+    region = "us-west-2"
+    key = "my_aws_key"
+    secret = "my_aws_secret"
+    prefix = "videos/"
+    next_page_token = $previous_page_token
+} as $video_list
+```
+
+Lists the contents of an AWS S3 bucket, optionally filtered by a `prefix`, with support for pagination via `next_page_token`. The resulting list is stored in the specified variable.
+
+# cloud.google.storage.upload_file
+
+```xs
+cloud.google.storage.upload_file {
+    service_account = "my_service_account_json"
+    bucket = "user_uploads"
+    filePath = "photos/vacation.jpg"
+    file = $uploaded_image
+    metadata = { "description": "Beach vacation photo" }
+}
+```
+
+Uploads a file to Google Cloud Storage at the specified `filePath` in a bucket, with optional `metadata` for additional details.
+
+# cloud.elasticsearch.request
+
+```xs
+cloud.elasticsearch.request {
+    auth_type = "API Key"
+    key_id = "my_key_id"
+    access_key = "my_access_key"
+    method = "GET"
+    url = "https://my-elastic-cluster.com/posts/_search"
+    payload = { "query": { "match": { "category": "tech" } } }
+} as $search_results
+```
+
+Sends an HTTP request to an Elastic Search cluster, executing the specified `method` with an optional `payload`. The response is stored in the given variable.
+
+# cloud.azure.storage.list_directory
+
+```xs
+cloud.azure.storage.list_directory {
+    account_name = "my_storage_account"
+    account_key = "my_secret_key"
+    container_name = "archives"
+    path = "2023/"
+} as $yearly_archives
+```
+
+Lists the contents of an Azure Blob Storage container, optionally filtered by a `path`. The list is stored in the specified variable.
+
+# cloud.aws.opensearch.document
+
+```xs
+cloud.aws.opensearch.document {
+    auth_type = "IAM"
+    key_id = "my_aws_key"
+    access_key = "my_aws_secret"
+    region = "us-east-1"
+    base_url = "https://my-opensearch-domain.com"
+    index = "articles"
+    method = "POST"
+    doc_id = "article_123"
+} as $article_response
+```
+
+Manages records (e.g., create, read, update, delete) in an AWS OpenSearch index using the specified `method`. The response is stored in the given variable.
+
+# cloud.elasticsearch.document
+
+```xs
+cloud.elasticsearch.document {
+    auth_type = "API Key"
+    key_id = "my_key_id"
+    access_key = "my_access_key"
+    base_url = "https://my-elastic-cluster.com"
+    index = "users"
+    method = "GET"
+    doc_id = "user_456"
+} as $user_profile
+```
+
+Manages records in an Elastic Search index (e.g., create, read, update, delete) with the specified `method`. The response is stored in the given variable.
+
+# cloud.aws.s3.read_file
+
+```xs
+cloud.aws.s3.read_file {
+    bucket = "app_resources"
+    region = "us-west-2"
+    key = "my_aws_key"
+    secret = "my_aws_secret"
+    file_key = "configs/settings.json"
+} as $app_settings_file
+```
+
+Reads a file from an AWS S3 bucket and stores its contents in a variable as a file resource.
+
+# cloud.azure.storage.delete_file
+
+```xs
+cloud.azure.storage.delete_file {
+    account_name = "my_storage_account"
+    account_key = "my_secret_key"
+    container_name = "temp_files"
+    filePath = "drafts/old_draft.docx"
+}
+```
+
+Deletes a blob from an Azure Blob Storage container at the specified `filePath`.
+
+# cloud.aws.s3.delete_file
+
+```xs
+cloud.aws.s3.delete_file {
+    bucket = "user_backups"
+    region = "us-east-1"
+    key = "my_aws_key"
+    secret = "my_aws_secret"
+    file_key = "backups/2023-01.zip"
+}
+```
+
+Deletes an object from an AWS S3 bucket at the specified `file_key`.
+
+# cloud.google.storage.read_file
+
+```xs
+cloud.google.storage.read_file {
+    service_account = "my_service_account_json"
+    bucket = "app_data"
+    filePath = "logs/error_log.txt"
+} as $error_log_file
+```
+
+Reads a file from Google Cloud Storage and stores its contents in a variable as a file resource.
+
+# cloud.aws.s3.get_file_info
+
+```xs
+cloud.aws.s3.get_file_info {
+    bucket = "product_images"
+    region = "us-east-1"
+    key = "my_aws_key"
+    secret = "my_aws_secret"
+    file_key = "items/shirt.jpg"
+} as $image_metadata
+```
+
+Retrieves metadata (e.g., size, last modified) about an object in an AWS S3 bucket, storing it in a variable.
+
+# cloud.aws.opensearch.request
+
+```xs
+cloud.aws.opensearch.request {
+    auth_type = "IAM"
+    key_id = "my_aws_key"
+    access_key = "my_aws_secret"
+    region = "us-west-2"
+    method = "POST"
+    url = "https://my-opensearch-domain.com/_search"
+    query = { "query": { "term": { "status": "active" } } }
+} as $active_items
+```
+
+Sends a request to AWS OpenSearch with the specified `method` and `query`, storing the response in a variable.
+
+# cloud.google.storage.list_directory
+
+```xs
+cloud.google.storage.list_directory {
+    service_account = "my_service_account_json"
+    bucket = "project_files"
+    path = "designs/"
+} as $design_files
+```
+
+Lists the contents of a Google Cloud Storage bucket, optionally filtered by `path`, storing the result in a variable.
+
+# cloud.google.storage.sign_url
+
+```xs
+cloud.google.storage.sign_url {
+    service_account = "my_service_account_json"
+    bucket = "public_assets"
+    filePath = "downloads/guide.pdf"
+    method = "GET"
+    ttl = 300
+} as $guide_download_url
+```
+
+Generates a signed URL for accessing a file in Google Cloud Storage, valid for `ttl` seconds, with the specified `method`.
+
+# cloud.google.storage.get_file_info
+
+```xs
+cloud.google.storage.get_file_info {
+    service_account = "my_service_account_json"
+    bucket = "app_assets"
+    filePath = "icons/app_icon.png"
+} as $icon_details
+```
+
+Retrieves metadata about a file in Google Cloud Storage, storing it in a variable.
+
+# cloud.azure.storage.get_file_info
+
+```xs
+cloud.azure.storage.get_file_info {
+    account_name = "my_storage_account"
+    account_key = "my_secret_key"
+    container_name = "media"
+    filePath = "videos/intro.mp4"
+} as $video_metadata
+```
+
+Retrieves metadata about a blob in Azure Blob Storage, storing it in a variable.
+
+# cloud.aws.opensearch.query
+
+```xs
+cloud.aws.opensearch.query {
+    auth_type = "IAM"
+    key_id = "my_aws_key"
+    access_key = "my_aws_secret"
+    region = "us-east-1"
+    base_url = "https://my-opensearch-domain.com"
+    index = "products"
+    return_type = "search"
+    expression = [{ "field": "price", "value": "100", "op": "lt" }]
+    size = 10
+    from = 0
+    included_fields = ["name", "price"]
+    sort = [{ "field": "price", "order": "asc" }]
+    payload = {}
+} as $cheap_products
+```
+
+Performs a search query on AWS OpenSearch with customizable filters, pagination, and sorting, storing results in a variable.
+
+# cloud.aws.s3.upload_file
+
+```xs
+cloud.aws.s3.upload_file {
+    bucket = "user_content"
+    region = "us-west-2"
+    key = "my_aws_key"
+    secret = "my_aws_secret"
+    file_key = "uploads/profile.jpg"
+    file = $user_photo
+    metadata = { "user_id": "123" }
+    object_lock_mode = "governance"
+    object_lock_retain_until = "2025-12-31"
+} as $upload_result
+```
+
+Uploads a file to an AWS S3 bucket with optional metadata and object lock settings, storing the response in a variable.
+
+# cloud.algolia.request
+
+```xs
+cloud.algolia.request {
+    application_id = "my_algolia_app_id"
+    api_key = "my_algolia_api_key"
+    url = "https://my-algolia-app.algolia.net/1/indexes/posts/query"
+    method = "POST"
+    payload = { "query": "tech" }
+} as $tech_posts
+```
+
+Sends a request to Algolia with the specified `method` and `payload`, storing the response in a variable.
+
+# cloud.azure.storage.upload_file
+
+```xs
+cloud.azure.storage.upload_file {
+    account_name = "my_storage_account"
+    account_key = "my_secret_key"
+    container_name = "user_files"
+    filePath = "docs/resume.pdf"
+    file = $user_resume
+    metadata = { "owner": "Jane" }
+} as $upload_confirmation
+```
+
+Uploads a file to Azure Blob Storage with optional metadata, storing the response in a variable.
+
+# cloud.google.storage.delete_file
+
+```xs
+cloud.google.storage.delete_file {
+    service_account = "my_service_account_json"
+    bucket = "temp_storage"
+    filePath = "old/temp_data.csv"
+}
+```
+
+Deletes a file from Google Cloud Storage at the specified `filePath`.
+
+# cloud.elasticsearch.query
+
+```xs
+cloud.elasticsearch.query {
+    auth_type = "API Key"
+    key_id = "my_key_id"
+    access_key = "my_access_key"
+    base_url = "https://my-elastic-cluster.com"
+    index = "orders"
+    return_type = "search"
+    expression = [{ "field": "total", "value": "50", "op": "gt" }]
+    size = 5
+    from = 0
+    included_fields = ["id", "total"]
+    sort = [{ "field": "total", "order": "desc" }]
+    payload = {}
+} as $large_orders
+```
+
+Executes a search query on Elastic Search with filters, pagination, and sorting, storing results in a variable.
+
+# cloud.azure.storage.read_file
+
+```xs
+cloud.azure.storage.read_file {
+    account_name = "my_storage_account"
+    account_key = "my_secret_key"
+    container_name = "logs"
+    filePath = "daily/2023-10-01.log"
+} as $daily_log_file
+```
+
+Reads a blob from Azure Blob Storage and stores its contents in a variable as a file resource.
+
+xanoscript - intro:
+
+Introduction to XanoScript
+NOTICE
+XanoScript is in beta and it is strongly recommended that you do not use it in production at this time.
+
+While there should be significant parity between the visual builder and XanoScript, we are still fine-tuning and adjusting XanoScript, and breaking changes may be introduced.
+
+Navigation
+Introduction
+
+Key Concepts
+
+XanoScript - Database
+
+XanoScript - Functions and APIs
+
+XanoScript - Background Tasks
+
+XanoScript Function Reference
+
+XanoScript Filter Reference
+
+What is XanoScript & Why It Exists
+The team at Xano has been hard at work creating a specialized language to bridge the gap between structure (JSON/XML/YAML) and flexibility (TypeScript). 
+
+The end result is XanoScript - a configuration language with programming flexibility. It provides a structured foundation that solves the following key challenges:
+
+AI-Friendly Structure: AI models trained on TypeScript encounter too many variations in logic structure—some more performant than others. XanoScript provides clear patterns that ensure AI-generated code is transparent, scalable, and optimized.
+
+All-in-One Configuration: XanoScript handles everything from database design and API endpoints to business logic, background tasks, and deployment settings in one consistent language.
+
+Bridging the Gap: We built XanoScript for collaboration. Developers can write code while product managers and non-technical team members can work visually in Xano, ensuring everyone stays aligned.
+
+Build How You Want: As development evolves, teams need flexibility. XanoScript allows you to prototype and ship faster—whether you prefer writing code in VS Code or Cursor, or working visually in Xano.
+
+Enhanced AI Development: Unlike temporary AI application generators that make bug fixing and iteration difficult, XanoScript enables you to build with your preferred AI model, deploy to Xano, and iterate either visually or with additional code based on your needs.
+
+Accessible Yet Powerful: XanoScript is built on established standards from JSON, YAML, and JavaScript. It's both accessible and powerful—if you know how to build in Xano, you're already proficient in XanoScript.
+
+What can I do with XanoScript?
+Use your favorite AI models to generate XanoScript and import it into Xano
+
+Generate your backend using AI, deploy it to Xano, and iterate using visual development
+
+Start with visual development, and continue in XanoScript.
+
+Switch between using XanoScript and visual development at any time.
+
+XanoScript works with the database and all types of function stacks, enabling you to use it anywhere inside of Xano.
+
+XanoScript Beta Status
+XanoScript will support every aspect of the Xano platform, but not everything is available during beta. See below for the current state of compatibility:
+
+Feature
+Status
+Tables
+
+Live
+
+API Queries
+
+Live
+
+Custom Functions
+
+Live
+
+Tasks
+
+Live
+
+Addons
+
+Development
+
+Triggers
+
+Development
+
+Middleware
+
+Development
+
+API Groups
+
+Development
+
+Branches
+
+Development
+
+Workspace Settings
+
+Development
+
+Other Features Currently In Development
+Database Link
+
+// Comments in XanoScript are not supported yet.
+
+Getting Started with XanoScript
+Ready to dive in and see what it looks like? Click the  button and check it out!
+
+If you're itching to get started writing XanoScript yourself, check out the following materials, starting with our Key Concepts.
+
+Key Concepts
+
+Using XanoScript in the Database
+
+Using XanoScript in your Function Stacks
+
+Comparing XanoScript to Traditional Code
+We know that developers value access to TypeScript’s ecosystem, and Xano fully supports this:
+
+XanoScript lays the foundation, but developers can still write custom business logic in TypeScript.
+
+Through Lambda Functions, you can integrate TypeScript and npm packages, unlocking the full power of external libraries.
+
+This means you get the best of both worlds:
+
+A structured, scalable backend with XanoScript
+
+The flexibility of TypeScript and npm libraries when needed
+
+XanoScript stands out for its exceptional readability. The declarative syntax clearly expresses intent without getting lost in implementation details. For example:
+
+Copy
+db.get user {
+  field_name = "email"
+  field_value = $input.email
+} as user
+This is immediately understandable even to non-programmers, unlike equivalent code in languages like JavaScript, PHP, or Python that would require more boilerplate and technical knowledge.
+
+Below, you'll find our standard signup authentication API in XanoScript, and a representation of what it might look like in other languages.
+
+Code Volume & Complexity
+XanoScript: ~30 lines of clear, concise code
+
+Node.js: ~80+ lines across multiple files with multiple dependencies
+
+PHP: ~80+ lines with manual request handling and validations
+
+Python/Django: ~80+ lines with model definitions, serializers, and views
+
+Each traditional implementation requires:
+
+Multiple files: Models, controllers, routes, services, DTOs, migrations
+
+Framework-specific patterns: Decorators in NestJS, hooks in GORM, ActiveRecord in Rails
+
+Configuration boilerplate: Setting up authentication, validation, database connections
+
+XanoScript provides a unified, single-file approach that encapsulates the entire functionality.
+
+XanoScript
+NodeJS
+PHP
+Python
+Go
+TypeScript
+Copy
+query auth/signup verb=POST {
+  description = "Signup and retrieve an authentication token"
+  input {
+    text name
+    email email
+    password password
+  }
+
+  stack {
+    db.get user {
+      field_name = "email"
+      field_value = $input.email
+    } as user
+  
+    precondition if (`$user == null`) {
+      error_type = "accessdenied"
+      error = "This account is already in use."
+    }
+  
+    db.add user {
+      data = {
+        created_at: "now"
+        name      : $input.name
+        email     : $input.email
+        password  : $input.password
+      }
+    } as user
+  
+    security.create_auth_token {
+      dbtable = "user"
+      expiration = 86400
+      id = $user.id
+    } as authToken
+  }
+
+  response {
+    value = {authToken: $authToken}
+  }
+}
+
+xano script language comparison:
+
+here is the same code written in different languages:
+
+Xanoscript:
+
+query auth/signup verb=POST {
+  description = "Signup and retrieve an authentication token"
+  input {
+    text name
+    email email
+    password password
+  }
+
+  stack {
+    db.get user {
+      field_name = "email"
+      field_value = $input.email
+    } as user
+  
+    precondition if (`$user == null`) {
+      error_type = "accessdenied"
+      error = "This account is already in use."
+    }
+  
+    db.add user {
+      data = {
+        created_at: "now"
+        name      : $input.name
+        email     : $input.email
+        password  : $input.password
+      }
+    } as user
+  
+    security.create_auth_token {
+      dbtable = "user"
+      expiration = 86400
+      id = $user.id
+    } as authToken
+  }
+
+  response {
+    value = {authToken: $authToken}
+  }
+}
+
+Node.js:
+
+// routes/auth.js
+const express = require('express');
+const router = express.Router();
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const { body, validationResult } = require('express-validator');
+const db = require('../database/connection');
+
+// Middleware for input validation
+const validateSignup = [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),
+  body('name').optional()
+];
+
+/**
+ * @route POST auth/signup
+ * @desc Signup and retrieve an authentication token
+ * @access Public
+ */
+router.post('/signup', validateSignup, async (req, res) => {
+  try {
+    // Check for validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { name, email, password } = req.body;
+
+    // Check if user already exists
+    const existingUser = await db.query(
+      'SELECT * FROM users WHERE email = ?', 
+      [email]
+    );
+
+    if (existingUser.length > 0) {
+      return res.status(403).json({ 
+        error_type: 'accessdenied',
+        error: 'This account is already in use.' 
+      });
+    }
+
+    // Hash password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Create user
+    const result = await db.query(
+      'INSERT INTO users (name, email, password, created_at) VALUES (?, ?, ?, NOW())',
+      [name, email, hashedPassword]
+    );
+
+    const userId = result.insertId;
+
+    // Generate auth token
+    const authToken = jwt.sign(
+      { id: userId },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' } // 86400 seconds
+    );
+
+    // Return token
+    return res.status(201).json({ authToken });
+  } catch (error) {
+    console.error('Signup error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+module.exports = router;
+
+// app.js
+const express = require('express');
+const app = express();
+const authRoutes = require('./routes/auth');
+
+app.use(express.json());
+app.use('/auth', authRoutes);
+
+// database/connection.js
+const mysql = require('mysql2/promise');
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+module.exports = {
+  query: async (sql, params) => {
+    const [rows] = await pool.execute(sql, params);
+    return rows;
+  }
+};
+
+php:
+
+<?php
+// config/database.php
+function getDbConnection() {
+    $host = getenv('DB_HOST');
+    $dbname = getenv('DB_NAME');
+    $username = getenv('DB_USER');
+    $password = getenv('DB_PASSWORD');
+    
+    try {
+        $conn = new PDO("mysql:host=$host;dbname=$dbname", $username, $password);
+        $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        return $conn;
+    } catch(PDOException $e) {
+        die("Connection failed: " . $e->getMessage());
+    }
+}
+
+// auth/signup.php
+header('Content-Type: application/json');
+
+// Validate request method
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'Method not allowed']);
+    exit;
+}
+
+// Get input data
+$data = json_decode(file_get_contents('php://input'), true);
+
+// Validate input
+$errors = [];
+if (!isset($data['email']) || !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+    $errors[] = 'Valid email is required';
+}
+if (!isset($data['password']) || strlen($data['password']) < 6) {
+    $errors[] = 'Password must be at least 6 characters';
+}
+
+if (!empty($errors)) {
+    http_response_code(400);
+    echo json_encode(['errors' => $errors]);
+    exit;
+}
+
+// Connect to database
+$conn = getDbConnection();
+
+// Check if user exists
+$stmt = $conn->prepare('SELECT id FROM users WHERE email = :email');
+$stmt->bindParam(':email', $data['email']);
+$stmt->execute();
+$user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if ($user) {
+    http_response_code(403);
+    echo json_encode([
+        'error_type' => 'accessdenied',
+        'error' => 'This account is already in use.'
+    ]);
+    exit;
+}
+
+// Hash password
+$hashedPassword = password_hash($data['password'], PASSWORD_DEFAULT);
+
+// Insert user
+$stmt = $conn->prepare('
+    INSERT INTO users (name, email, password, created_at) 
+    VALUES (:name, :email, :password, NOW())
+');
+$stmt->bindParam(':name', $data['name']);
+$stmt->bindParam(':email', $data['email']);
+$stmt->bindParam(':password', $hashedPassword);
+$stmt->execute();
+
+$userId = $conn->lastInsertId();
+
+// Generate auth token
+require_once 'vendor/autoload.php';
+use Firebase\JWT\JWT;
+
+$tokenId = base64_encode(random_bytes(16));
+$issuedAt = time();
+$expire = $issuedAt + 86400; // 24 hours
+$serverName = $_SERVER['SERVER_NAME'];
+
+$tokenPayload = [
+    'iat' => $issuedAt,
+    'jti' => $tokenId,
+    'iss' => $serverName,
+    'exp' => $expire,
+    'userId' => $userId
+];
+
+$secretKey = getenv('JWT_SECRET');
+$authToken = JWT::encode($tokenPayload, $secretKey, 'HS256');
+
+// Return response
+echo json_encode(['authToken' => $authToken]);
+
+python:
+
+# models.py
+from django.db import models
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.utils import timezone
+
+class UserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError('The Email field must be set')
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+class User(AbstractBaseUser, PermissionsMixin):
+    name = models.CharField(max_length=255, blank=True)
+    email = models.EmailField(unique=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    is_active = models.BooleanField(default=True)
+    is_staff = models.BooleanField(default=False)
+
+    objects = UserManager()
+
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = []
+
+# serializers.py
+from rest_framework import serializers
+from .models import User
+
+class UserSignupSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, min_length=6)
+
+    class Meta:
+        model = User
+        fields = ['name', 'email', 'password']
+
+    def create(self, validated_data):
+        return User.objects.create_user(**validated_data)
+
+# views.py
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+from .serializers import UserSignupSerializer
+from .models import User
+
+class SignupView(APIView):
+    def post(self, request):
+        # Check if user exists
+        email = request.data.get('email')
+        if email and User.objects.filter(email=email).exists():
+            return Response(
+                {
+                    'error_type': 'accessdenied',
+                    'error': 'This account is already in use.'
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        serializer = UserSignupSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            refresh = RefreshToken.for_user(user)
+            
+            return Response(
+                {'authToken': str(refresh.access_token)},
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# urls.py
+from django.urls import path
+from .views import SignupView
+
+urlpatterns = [
+    path('auth/signup', SignupView.as_view(), name='signup'),
+]
+
+# settings.py (partial)
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),  # 86400 seconds
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+}
+
+Go:
+
+// models/user.go
+package models
+
+import (
+  "time"
+
+  "golang.org/x/crypto/bcrypt"
+  "gorm.io/gorm"
+)
+
+type User struct {
+  ID        uint      `gorm:"primarykey" json:"id"`
+  Name      string    `json:"name"`
+  Email     string    `gorm:"uniqueIndex" json:"email"`
+  Password  string    `json:"-"`
+  CreatedAt time.Time `json:"created_at"`
+}
+
+// HashPassword encrypts user password
+func (u *User) HashPassword() error {
+  hashedPassword, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
+  if err != nil {
+    return err
+  }
+  u.Password = string(hashedPassword)
+  return nil
+}
+
+// BeforeCreate - GORM hook that hashes password before user creation
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+  return u.HashPassword()
+}
+
+// handlers/auth.go
+package handlers
+
+import (
+  "net/http"
+  "time"
+
+  "github.com/gin-gonic/gin"
+  "github.com/golang-jwt/jwt/v4"
+  "github.com/yourapp/models"
+  "gorm.io/gorm"
+)
+
+type SignupInput struct {
+  Name     string `json:"name" binding:"omitempty"`
+  Email    string `json:"email" binding:"required,email"`
+  Password string `json:"password" binding:"required,min=6"`
+}
+
+type TokenResponse struct {
+  AuthToken string `json:"authToken"`
+}
+
+type AuthHandler struct {
+  DB     *gorm.DB
+  Secret string
+}
+
+func NewAuthHandler(db *gorm.DB, secret string) *AuthHandler {
+  return &AuthHandler{
+    DB:     db,
+    Secret: secret,
+  }
+}
+
+func (h *AuthHandler) Signup(c *gin.Context) {
+  var input SignupInput
+  if err := c.ShouldBindJSON(&input); err != nil {
+    c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+    return
+  }
+
+  // Check if user exists
+  var existingUser models.User
+  result := h.DB.Where("email = ?", input.Email).First(&existingUser)
+  if result.Error == nil {
+    c.JSON(http.StatusForbidden, gin.H{
+      "error_type": "accessdenied",
+      "error":      "This account is already in use.",
+    })
+    return
+  } else if result.Error != gorm.ErrRecordNotFound {
+    c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+    return
+  }
+
+  // Create user
+  user := models.User{
+    Name:      input.Name,
+    Email:     input.Email,
+    Password:  input.Password,
+    CreatedAt: time.Now(),
+  }
+
+  if result := h.DB.Create(&user); result.Error != nil {
+    c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+    return
+  }
+
+  // Generate token
+  token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+    "id":  user.ID,
+    "exp": time.Now().Add(time.Hour * 24).Unix(), // 86400 seconds
+  })
+
+  tokenString, err := token.SignedString([]byte(h.Secret))
+  if err != nil {
+    c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+    return
+  }
+
+  c.JSON(http.StatusCreated, TokenResponse{
+    AuthToken: tokenString,
+  })
+}
+
+// main.go
+package main
+
+import (
+  "os"
+
+  "github.com/gin-gonic/gin"
+  "github.com/joho/godotenv"
+  "github.com/yourapp/handlers"
+  "github.com/yourapp/models"
+  "gorm.io/driver/mysql"
+  "gorm.io/gorm"
+)
+
+func main() {
+  godotenv.Load()
+
+  dsn := os.Getenv("DB_DSN")
+  db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+  if err != nil {
+    panic("failed to connect to database")
+  }
+
+  // Auto migrate the schema
+  db.AutoMigrate(&models.User{})
+
+  // Initialize router
+  r := gin.Default()
+
+  // Initialize handlers
+  authHandler := handlers.NewAuthHandler(db, os.Getenv("JWT_SECRET"))
+
+  // Register routes
+  r.POST("/auth/signup", authHandler.Signup)
+
+  r.Run(":8080")
+}
+
+typescript:
+
+// user.entity.ts
+import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Exclude } from 'class-transformer';
+
+@Entity('users')
+export class User {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column({ nullable: true })
+  name: string;
+
+  @Column({ unique: true })
+  email: string;
+
+  @Column()
+  @Exclude()
+  password: string;
+
+  @CreateDateColumn()
+  createdAt: Date;
+}
+
+// signup.dto.ts
+import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
+
+export class SignupDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsEmail()
+  email: string;
+
+  @IsString()
+  @MinLength(6)
+  password: string;
+}
+
+// auth.service.ts
+import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { User } from './user.entity';
+import { SignupDto } from './signup.dto';
+import * as bcrypt from 'bcrypt';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
+    private jwtService: JwtService,
+  ) {}
+
+  async signup(signupDto: SignupDto): Promise<{ authToken: string }> {
+    const { name, email, password } = signupDto;
+
+    // Check if user exists
+    const existingUser = await this.userRepository.findOne({ where: { email } });
+    if (existingUser) {
+      throw new ConflictException({
+        error_type: 'accessdenied',
+        error: 'This account is already in use.',
+      });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt();
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Create user
+    const user = this.userRepository.create({
+      name,
+      email,
+      password: hashedPassword,
+    });
+
+    await this.userRepository.save(user);
+
+    // Generate token
+    const payload = { sub: user.id };
+    const authToken = this.jwtService.sign(payload);
+
+    return { authToken };
+  }
+}
+
+// auth.controller.ts
+import { Body, Controller, Post } from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { SignupDto } from './signup.dto';
+
+@Controller('auth')
+export class AuthController {
+  constructor(private authService: AuthService) {}
+
+  @Post('signup')
+  signup(@Body() signupDto: SignupDto) {
+    return this.authService.signup(signupDto);
+  }
+}
+
+// auth.module.ts
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
+import { User } from './user.entity';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([User]),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.get('JWT_SECRET'),
+        signOptions: {
+          expiresIn: '24h', // 86400 seconds
+        },
+      }),
+    }),
+  ],
+  controllers: [AuthController],
+  providers: [AuthService],
+})
+export class AuthModule {}
+
+// app.module.ts
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuthModule } from './auth/auth.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        type: 'mysql',
+        host: configService.get('DB_HOST'),
+        port: configService.get('DB_PORT'),
+        username: configService.get('DB_USERNAME'),
+        password: configService.get('DB_PASSWORD'),
+        database: configService.get('DB_DATABASE'),
+        entities: [__dirname + '/**/*.entity{.ts,.js}'],
+        synchronize: configService.get('NODE_ENV') !== 'production',
+      }),
+    }),
+    AuthModule,
+  ],
+})
+export class AppModule {}
+
+
+XanoScript Key Concepts:
+
+While there should be significant parity between the visual builder and XanoScript, we are still fine-tuning and adjusting XanoScript, and breaking changes may be introduced.
+
+Navigation
+Introduction
+
+Key Concepts
+
+XanoScript - Database
+
+XanoScript - Functions and APIs
+
+XanoScript - Background Tasks
+
+XanoScript Function Reference
+
+XanoScript Filter Reference
+
+Core Data Types
+Numbers
+Integers
+Whole numbers like 1, 2, 3, and -5
+
+Copy
+-5
+Copy
+3
+Copy
+2
+Copy
+1
+Decimals
+Numbers with fractional parts like 1.23, 0.5, -10.7
+
+Copy
+-10.7
+Copy
+0.5
+Copy
+1.23
+Text
+Simple Text
+Text must be wrapped in double or single quotes.
+
+Copy
+"Hello"
+Copy
+'Hello'
+Alternative text syntax if you need a line with the triple double quotes
+
+Copy
+var $x1 {
+  value = '''
+    here is some text
+    """
+    here is another line of text
+      here is text indented
+    here is more text
+    '''
+}
+Escaping Quotes
+Escape characters are required when using single or double quotes inside of a text string.
+
+Copy
+'This has a \'quoted\' word inside it'
+Copy
+"This has a \"quoted\" word inside it"
+Complex Data Types (JSON)
+XanoScript automatically chooses the most readable quote style for your text. It uses double quotes by default, but switches to single quotes when your text contains double quotes (like JSON data). This makes JSON strings much cleaner and easier to read in your code.
+
+This is problematic and hard to read.
+
+Copy
+"{\"name\":\"John\",\"age\":30}"
+This is how XanoScript handles it.
+
+Copy
+'{"name":"John","age":30}'
+Multiline Text
+XanoScript supports multiline text using triple quotes ("""). This allows you to write text across multiple lines without needing escape characters for line breaks.
+
+The indentation of the closing """ determines the common whitespace that is removed from each line of the text. This is similar to multiline string handling in YAML, and it allows you to maintain the text block's position within your code without needing to left-align every line.
+
+Copy
+var $x1 {
+    value = """
+        here is some text
+        here is another line of text
+            here is text indented
+        here is more text
+    """
+}
+Important: Multiline text defined using """ cannot be used directly with filters or transformations. If you need to apply filters or transformations to multiline text, you must use escaped line break characters () instead.
+
+"Dear John,\nYour order will arrive by Friday.\nRegards,\nCustomer Service"|to_upper
+
+Boolean (true/false) Values
+True / False
+Booleans are special values that, while presented as text, do not require quotes.
+
+Copy
+false
+Copy
+true
+Date & Time
+Standard Date & Time Format
+XanoScript uses a standardized format for timestamps: YYYY-MM-DD HH:MM:SS+ZZZZ. This format includes the date, time, and timezone offset.
+
+Copy
+2024-12-09 17:37:42+0000
+This represents December 09, 2024 at 5:37.42 PM in UTC time.
+
+It's important to note that XanoScript does not plainly support the Unix EPOCH format that you might be used to when working in Xano. XanoScript can't tell the difference between a timestamp and a regular integer. 
+
+Complex Data Types
+Objects
+Objects can be written in XanoScript using ` characters.
+
+Copy
+`{"name":"John", "age":30, "car":null}`
+Standard JavaScript syntax works perfectly.
+
+Copy
+{
+  "name": "John",
+  "age": 30,
+  "city": "New York"
+}
+Commas are not required, but XanoScript also supports trailing commas.
+
+Copy
+{
+  "name": "John",
+  "age": 30,
+  "city": "New York",
+}
+Arrays
+Arrays can be written in XanoScript using ` characters.
+
+Copy
+`[1,2,3,4,5]`
+Standard JavaScript syntax works perfectly.
+
+Copy
+["apple", "banana", "cherry"]
+Commas are not required, and XanoScript also supports trailing commas.
+
+Copy
+[
+  "apple",
+  "banana",
+  "cherry",
+]
+Expressions
+Xano's Expression data type is fully supported in XanoScript. Expressions should be wrapped in ` characters.
+
+Copy
+{a:1, b:2}
+Copy
+123|add:1
+We also have support for multiline expressions using triple ticks ```
+
+Copy
+var $x1 {
+  value = ```
+    ($input.end_point.data.lat|sub:$input.start_point.data.lat)
+    |multiply:0.017453292519943
+    |sin
+    |pow:2
+    ```
+}
+Type Casting
+Type casting is the optional process of preceding a value with its intended type, such as one from the list below.
+
+Data Type
+Cast
+Number
+
+!int
+
+Text
+
+!text
+
+Boolean
+
+!boolean
+
+Decimal
+
+!decimal
+
+null
+
+!null
+
+Array
+
+!array
+
+Object
+
+!object
+
+Expression
+
+!expr
+
+Timestamp
+
+!timestamp
+
+Because XanoScript can infer types from the data that exists, you typically will not have to work with type casting, but it can serve as an additional layer of certainty around data integrity.
+
+Using type casting limits some of your available options for writing XanoScript.
+
+Casted values do not support multi-line text. You will want to use line break characters.
+
+All casted values only operate on text strings, so each value must be wrapped inside quotes.
+
+Valid Type Casting
+Copy
+value = !int "123"
+Invalid Type Casting
+Copy
+value = !int 123
+Variables
+All variable references must start with a $.
+
+Getting Started
+Now that you understand the basic concepts of XanoScript, you can move forward to learning about the intricacies of using XanoScript in your function stacks or in the database.
+
+
+
+xanoscript - database syntax:
+ 
+
+XanoScript for the Database
+NOTICE
+XanoScript is in beta and it is strongly recommended that you do not use it in production at this time.
+
+While there should be significant parity between the visual builder and XanoScript, we are still fine-tuning and adjusting XanoScript, and breaking changes may be introduced.
+
+Navigation
+Introduction
+
+Key Concepts
+
+XanoScript - Database
+
+XanoScript - Functions and APIs
+
+XanoScript - Background Tasks
+
+XanoScript Function Reference
+
+XanoScript Filter Reference
+
+Table Structure
+A basic table definition in XanoScript follows this structure:
+
+Copy
+table table_name {
+  description = "Table description"
+  // Table configuration
+  
+  schema {
+    // Field definitions
+  }
+  
+  // Additional configuration (indexes, etc.)
+}
+Table Configuration
+Basic Configuration
+Copy
+table user {
+  description = "Stores user account information"
+  auth = true
+  security {
+    guid = "jEtOgQNmV9PyfuNYgGLBBWiSwHc"
+  }
+  
+  // Schema and other configurations follow
+}
+description: A human-readable description of the table's purpose
+
+auth: When set to true, enables authentication features for this table
+
+security: Configuration block for security settings
+
+guid: A unique identifier for security purposes
+
+Xano will automatically generate a GUID for you, and this should not be modified unless you have a very specific reason to do so.
+
+Schema Definition
+The schema block defines all fields (columns) in your table:
+
+Copy
+schema {
+  // Field definitions go here
+}
+Field Definitions
+Each field follows this general pattern:
+
+Copy
+field_type field_name modifiers {
+  // Additional field properties
+}
+field_type: The data type of the field (uuid, text, number, etc.)
+
+field_name: The name of the field
+
+modifiers: Optional modifiers that change the field behavior
+
+Additional properties in braces {} may be optional depending on the field type
+
+NOTE
+Your schema must begin with an ID field. You can choose one of two types: int or uuid
+
+Copy
+schema {
+    int id
+Copy
+schema {
+    uuid id
+Changing your primary key type after table creation is not supported.
+
+Field Modifiers
+Fields can be marked as required, nullable, and / or specify a default value.
+
+?: Makes the field optional (nullable)
+
+?=default_value: Makes the field optional with a default valu```
+
+Copy
+text name?                     // Not required, not nullable
+text name                      // Required, not nullable
+text ?name?                    // Optional, nullable
+text ?name                     // Required, nullable
+text name?=defaultValue        // Default value specified
+Field Properties
+Fields can have additional properties defined within braces. This is an example of a text field called address with a description attached.
+
+Copy
+text address? {
+  description = "User's full address"
+}
+description: Human-readable description of the field's purpose
+
+filters: Data processing filters applied to the field before storage
+
+Filters
+Filters can be applied to fields to process data:
+
+Copy
+email ?email filters=trim|lower
+password ?password filters=min:8|minAlpha:1|minDigit:1
+Filters are separated by | and their parameters are separated by :.
+
+Validation Filters
+
+min:n: Enforces a minimum length for the entry (e.g., min:8)
+
+max:n: Enforces a maximum length for the entry (e.g., max:100)
+
+minAlpha:n: Requires a minimum number of alphabetic characters
+
+minDigit:n: Requires a minimum number of digits
+
+pattern:regex: Validates input against a regex pattern
+
+Character Filters
+
+alphaOk: Whitelists alphabet characters (a-z, A-Z)
+
+digitOk: Whitelists numerical characters (0-9)
+
+ok:chars: Whitelists specific characters (e.g., ok:.-_)
+
+Transformation Filters
+
+trim: Removes whitespace from beginning and end
+
+lower: Converts all characters to lowercase
+
+upper: Converts all characters to uppercase
+
+Restriction Filters
+
+startsWith:prefix: Enforces that the entry starts with a specific prefix
+
+prevent:blacklist: Prevents specific blacklisted phrases (e.g., prevent:admin|root|superuser)
+
+Indexes
+Indexes improve query performance and enforce constraints:
+
+Copy
+index = [
+  {type: "primary", field: [{name: "id"}]}
+  {type: "btree|unique", field: [{name: "email", op: "asc"}]}
+]
+Index definition includes:
+
+type: The index type (primary, btree, gin, etc.)
+
+Can enforce unique with a | separator
+
+field: Array of fields to include in the index
+
+name: Field name to index
+
+op: Optional operator (asc, desc, etc.)
+
+Multi-field Indexes
+Indexes can span multiple fields for complex querying:
+
+Copy
+{
+  type : "btree"
+  field: [
+    {name: "phone_number", op: "asc"}
+    {name: "date_of_birth", op: "asc"}
+  ]
+}
+Complete Example
+Here's a users table:
+
+
+Here's the XanoScript for the above table:
+
+Copy
+table user {
+  description = "Stores user account information"
+  auth = true
+  security {
+    guid = "jEtOgQNmV9PyfuNYgGLBBWiSwHc"
+  }
+
+  schema {
+    int id
+    timestamp created_at?=now
+    text ?name filters=trim {
+      description = "User's full name"
+    }
+  
+    email ?email filters=trim|lower
+    password ?password filters=min:8|minAlpha:1|minDigit:1
+    text address? {
+      description = "User's full address"
+    }
+  
+    text phone_number? {
+      description = "User's phone number"
+    }
+  
+    date date_of_birth? {
+      description = "User's date of birth"
+    }
+  
+    image profile_picture? {
+      description = "User's profile picture"
+    }
+  
+    bool is_active? {
+      description = "Whether the user is active"
+    }
+  
+    enum preferred_language? {
+      values = ["English", "Spanish", "French", "German"]
+      description = "User's preferred language"
+    }
+  
+    json additional_data? {
+      description = "Additional user data"
+    }
+  }
+
+  index = [
+    {type: "primary", field: [{name: "id"}]}
+    {type: "gin", field: [{name: "xdo", op: "jsonb_path_op"}]}
+    {type: "btree", field: [{name: "created_at", op: "desc"}]}
+    {type: "btree|unique", field: [{name: "email", op: "asc"}]}
+    {
+      type : "btree"
+      field: [
+        {name: "phone_number", op: "asc"}
+        {name: "date_of_birth", op: "asc"}
+      ]
+    }
+    {
+      type : "btree|unique"
+      field: [{name: "phone_number", op: "asc"}]
+    }
+  ]
+}
+
+ xanoscript - functions:
+
+
+ XanoScript for Function Stacks
+NOTICE
+XanoScript is in beta and it is strongly recommended that you do not use it in production at this time.
+
+While there should be significant parity between the visual builder and XanoScript, we are still fine-tuning and adjusting XanoScript, and breaking changes may be introduced.
+
+Navigation
+Introduction
+
+Key Concepts
+
+XanoScript - Database
+
+XanoScript - Functions and APIs
+
+XanoScript - Background Tasks
+
+XanoScript Function Reference
+
+XanoScript Filter Reference
+
+A note about Custom Functions
+APIs and custom functions behave largely the same in XanoScript, so you can use this documentation to serve as a resource for both.
+
+The only additional resource you will need is some custom function specific XanoScript, which is available below. Starting at the input block, everything is the same as an API.
+
+Copy
+function "My Custom Function" {
+  description = "Here's a description" 
+Accessing XanoScript in your Function Stacks
+Use the quick toggle above the input blocks to switch between XanoScript and the visual builder.
+
+
+What does a XanoScript function stack look like?
+This is a typical Get Record API endpoint.
+
+
+Here is the XanoScript representation.
+
+Copy
+query "user/{user_id}" verb=GET {
+  input {
+    int user_id? filters=min:1
+  }
+
+  stack {
+    db.get user {
+      field_name = "id"
+      field_value = $input.user_id
+    } as model
+  
+    precondition if (`$model != null`) {
+      error_type = "notfound"
+      error = "Not Found"
+    }
+  }
+
+  response {
+    value = $model
+  }
+}
+Part 1 - Definition and Inputs
+Copy
+query "user/{user_id}" verb=GET {
+  input {
+    int user_id? filters=min:1
+  }
+query "user/{user_id}" verb=GET {
+
+Here, we define what we are building (query is an API endpoint), give it a name user/{user_id}, and assign the verb verb=GET
+
+Copy
+  input {
+    int user_id? filters=min:1
+  }
+Finally, we define our inputs: an int input called user_id. We've also applied a ? after user_id to indicate that this value is not required, and added a filter to enforce a minimum value of 1.
+
+Part 2 - The function stack
+The function stack is contained in an object that starts with stack {
+
+Each function name is designed to be human readable, just like the function stack. They will be immediately followed by an object that provides those function parameters.
+
+If the function outputs to a variable, that is defined after the object is closed.
+
+Here, we're starting with a Get Record function on the table named user.  
+
+Function Stack
+XanoScript
+
+
+Copy
+    db.get user {
+
+
+Copy
+      field_name = "id"
+      field_value = $input.user_id
+
+
+Copy
+    } as model
+Part 3 - The response
+Once your inputs and function stack are defined, we can build our response.  This begins with a  response { object.
+
+Our response will be a JSON object, which is standard.
+
+Function Stack
+XanoScript
+
+
+Copy
+  response {
+    value = $model
+  }
+Using Functions
+Functions in XanoScript are designed to be as close to second nature as possible for someone who is already familiar with building in the function stack. We've designed the function names and options to ensure as much parity with the visual builder as possible.
+
+Functions will typically begin with a namespace — basically, a category that the function is a part of. Each namespace is separated with a period.
+
+As an example, the namespace below is what's used for database operations — db.
+
+Copy
+db.
+Sometimes, functions will use multiple namespaces, such as cloud.aws.opensearch. This is infrequent though — you will usually only find yourself using a single namespace. 
+
+After the namespace, we'd use the function name, such as:
+
+Copy
+db.get
+This is the XanoScript command for Get Record. From here, things get a little more specific depending on the function you are using. For example, db.get is immediately followed by the name of the table we're querying.
+
+Copy
+db.get user
+After we've defined our function, we can start providing the parameters that function requires, if any. Parameters are wrapped in {} characters. Get Record asks for a field_name and a field_value. Parameters do not require any quotation marks or other special characters for the parameter name, but may require them for the value depending on the data type (for example, "hello" vs 123.
+
+Visual Builder
+XanoScript
+
+
+Copy
+db.get user {
+    field_name = "id"
+    field_value = 1
+    }
+Finally, if the function outputs to a variable, we'll establish that outside of the parameter object.
+
+Copy
+    db.get user {
+      field_name = "id"
+      field_value = 1
+    } as user1
+Now that you have an understanding of how to write XanoScript in your function stacks, you can start building! There are a couple of different recommended ways to get started.
+
+Build a function stack in the visual builder and review the generated XanoScript.
+Add some functions to a function stack, and then click  > XanoScript in the upper-right corner.
+
+Try changing some values or adding a simple function, and watch the visual builder update with the changes you've made. You can switch from building with XanoScript to the visual builder at any time, and always see your changes reflected.
+
+Review the function reference and build with XanoScript from scratch.
+Use the function reference to see how all of our functions are written using XanoScript, and try building your own!
+
+
+
+xanoscript - database operation functions:
+
+
+
+ Query All Records
+Simple Query
+Get all records from a table
+
+Copy
+   db.query table as $variable
+Parameter
+Purpose
+Example
+table
+
+The name of the table to query
+
+user
+
+as
+
+The variable to store the result
+
+allUsers
+
+Custom Queries
+Copy
+    db.query user {
+      search = `$db.user.id == 1`
+    } as $user1
+Parameter
+Purpose
+Example
+search
+
+The query to run
+
+Copy
+$db.user.id == 1
+Joins
+Copy
+    db.query user {
+      search = `$db.user.id == 1`
+      bind = [
+        {
+          as    : "user_2"
+          name  : "user"
+          join  : "left"
+          search: `$db.user.id == $db.user_2.id`
+        }
+      ]
+    
+    } as $user1
+Parameter
+Purpose
+Example
+bind
+
+The array to contain each join
+
+Each item should be contained in an object inside of the array
+
+as
+
+The internal name of the joined table
+
+user_2
+
+name
+
+The name of the table being joined
+
+user
+
+join
+
+The type of join. This can be either left, inner, or right
+
+left
+
+search
+
+The conditional query to perform when matching records in the join
+
+Copy
+`$db.user.id == $db.user_2.id`
+Customizing the Response
+Copy
+    db.query user {
+      search = `$db.user.id == 1` 
+      output = ["id", "name"]
+    } as $user1
+Parameter
+Purpose
+Example
+output
+
+The list of fields returned to display in the response.
+
+["id", "name"]
+
+Return Options
+Return Type
+Returns are defined immediately before } as returnVariable
+
+Exists
+
+Copy
+      return_exists = {}
+Count
+
+Copy
+      return_count = {}
+Single
+
+Copy
+      return_single = {}
+List
+
+Copy
+      return_list = {}
+Stream
+
+Copy
+      return_stream = {}
+Aggregate
+
+
+Copy
+      return_aggregate = {
+              group: [
+                        {
+                              name  : "user.created_at"
+                              as    : "user_createdAt"
+                              filter: [{name: "epochms_doy", arg: [{value: "UTC"}]}]
+                              }
+                              ]
+                              eval : [
+                                    {
+                                          name  : "user.userRole"
+                                          as    : "userRole"
+                                          filter: [{name: "to_distinct_list"}]
+                                          }
+                                    ]
+                        }
+Sorting
+
+Sorts are applied as part of the return object. Each sort contains a sort and an order 
+
+Copy
+  return_single = {sorting: [{sort: "user.id", order: "asc"}]}
+Paging
+
+Paging is applied as part of the return object. 
+
+Copy
+    paging: {
+          page    : 1
+          per_page: 25
+          totals  : true
+          offset  : 0
+          metadata: true
+          }
+External paging is defined as part of the return object.
+
+Copy
+      external_simple = {
+              page    : 1
+              per_page: 1
+              offset  : 1        
+              search  : 1        
+              sort    : 1
+            }
+ Get Record
+Simple query
+Copy
+db.get test_data {
+      field_name = "id"
+      field_value = $input.id
+    } as $foundRecord
+}
+Parameter
+Purpose
+Example
+field_name
+
+Uses the specified column to search against
+
+id
+
+field_value
+
+Uses the value to search the specified column to retrieve a found match
+
+"1"
+
+as
+
+The variable name that holds the record found
+
+foundRecord
+
+Customizing the Response
+Copy
+db.get color_pair {
+      field_name = "id"
+      field_value = $input.id
+      output = ["id", "created_at", "user"]
+} as $color_pair1
+Parameter
+Purpose
+Example
+output
+
+The list of fields returned to display in the response.
+
+["id", "created_at", "user"]
+
+Copy
+db.get test_data {
+      field_name = "id"
+      field_value = $input.id
+    } as foundRecord
+}
+
+
+ Has Record
+Copy
+    db.has user {
+      field_name = "id"
+      field_value = $input.id
+    } as $user1
+Parameter
+Purpose
+Example
+field_name
+
+The length of the key generated. Common values are 1024, 2048, 4096, etc...
+
+1024
+
+field_value
+
+The format of the key generated. This can be either object or base64
+
+"object"
+
+Copy
+    security.create_rsa_key {
+      bits = 1024
+      format = "object"
+    } as crypto1
+
+
+ Add Record
+Copy
+db.add user {
+    data = {
+        created_at: "now",
+        name: $input.name,
+        email: $input.email,
+        password: $input.password
+    }
+} as $recordAdd
+Parameter
+Purpose
+Example
+data
+
+Object containing the fields and values for the new record
+
+{name: "John", email: "john@example.com"}
+
+Copy
+// Create a new user record
+db.add user {
+    data = {
+        created_at: "now",
+        name: "John Doe",
+        email: "john@example.com",
+        password: "hashedPassword123"
+    }
+} as newUser
+ Edit Record
+Edits the contents of an existing record in the database by specifying the target record and the data to update.
+
+Copy
+db.edit user {
+    field_name = "id"
+    field_value = 1
+    data = {
+        name: $input.name,
+        list: $listVar
+    }
+} as $user2
+Parameters
+Parameter
+Purpose
+Example
+field_name
+
+The database field name to search within
+
+"id"
+
+field_value
+
+The value to match in the specified field
+
+1
+
+data
+
+Object containing the fields and values to update
+
+{name: "John", list: ["item1"]}
+
+Copy
+// Update a user's name and list
+db.edit user {
+    field_name = "id"
+    field_value = 1
+    data = {
+        name: $input.name,
+        list: $listVar
+    }
+} as user2
+
+// Update specific fields in a record
+db.edit products {
+    field_name = "sku"
+    field_value = "PROD-123"
+    data = {
+        price: 29.99,
+        stock: 100
+    }
+} as updatedProduct
+💡 The function will only update the fields specified in the data object. Other fields in the record will remain unchanged.
+
+Notes
+You must specify which record to update using field_name and field_value
+
+The data object should only include the fields you want to update
+
+You can reference input variables ($input) or other variables in your data object
+
+The updated record will be returned in the variable specified after as
+
+ Add or Edit Record
+Copy
+db.add_or_edit user {
+    field_name = "id"
+    field_value = $input.id
+    data = {name: $input.name}
+} as $recordAddOrEdit
+Parameter
+Purpose
+Example
+field_name
+
+Field to search for the record
+
+"id"
+
+field_value
+
+Value to match in the search field
+
+1
+
+data
+
+Object containing fields to update/create
+
+{name: "John"}
+
+Copy
+// Update or create user profile
+db.add_or_edit user_profile {
+    field_name = "user_id"
+    field_value = 456
+    data = {
+        bio: "Software Developer",
+        location: "San Francisco"
+    }
+} as userProfile
+ Delete Record
+Copy
+db.del user {
+    field_name = "id"
+    field_value = $input.id
+}
+Parameter
+Purpose
+Example
+field_name
+
+Field to search for the record
+
+"id"
+
+field_value
+
+Value to match in the search field
+
+1
+
+Copy
+// Delete inactive user
+db.del user {
+    field_name = "email"
+    field_value = "old@example.com"
+} as deletedUser
+ Patch Record
+Copy
+db.patch user {
+    field_name = "id"
+    field_value = $input.id
+    data = {}|set:"name":$input.name
+} as $patchRecord
+Parameter
+Purpose
+Example
+field_name
+
+Field to search for the record
+
+"id"
+
+field_value
+
+Value to match in the search field
+
+1
+
+data
+
+Object with fields to patch
+
+{name: "John"}
+
+Copy
+// Update only the last_login field
+db.patch user {
+    field_name = "id"
+    field_value = 789
+    data = {}|set:"last_login":"now"
+} as updatedLoginTime
+ Bulk Operations
+Copy
+db.bulk.add user {
+    allow_id_field = false
+    items = $input.arrayData
+} as $bulkAdd
+Parameter
+Purpose
+Example
+allow_id_field
+
+Allow manual ID specification
+
+false
+
+items
+
+Array of records to add
+
+[{name: "John"}, {name: "Jane"}]
+
+Copy
+// Add multiple users at once
+db.bulk.add user {
+    allow_id_field = false
+    items = [
+        {
+            name: "John Doe",
+            email: "john@example.com"
+        },
+        {
+            name: "Jane Smith",
+            email: "jane@example.com"
+        }
+    ]
+} as newUsers
+Copy
+db.bulk.update user {
+    items = $input.arrayData
+} as $updateBulk
+Parameter
+Purpose
+Example
+items
+
+Array of records to update
+
+[{id: 1, name: "John"}, {id: 2, name: "Jane"}]
+
+Copy
+// Update status for multiple users
+db.bulk.update user {
+    items = [
+        {id: 1, status: "active"},
+        {id: 2, status: "inactive"},
+        {id: 3, status: "pending"}
+    ]
+} as statusUpdates
+Copy
+db.bulk.patch user {
+    items = $input.arrayData
+} as $patchBulk
+Parameter
+Purpose
+Example
+items
+
+Array of records to patch
+
+[{id: 1, name: "John"}, {id: 2, name: "Jane"}]
+
+Copy
+// Update role for multiple users
+db.bulk.patch user {
+    items = [
+        {id: 1, data: {}|set:"role":"admin"},
+        {id: 2, data: {}|set:"role":"moderator"}
+    ]
+} as roleUpdates
+Copy
+db.bulk.delete user {
+    search = `$db.user.id >= 100 && $db.user.id <= 150`
+} as $deleteBulk
+Parameter
+Purpose
+Example
+search
+
+Query condition for deletion
+
+$db.user.id >= 100
+
+Copy
+// Delete all inactive users
+db.bulk.delete user {
+    search = `$db.user.status == "inactive" && $db.user.last_login < "2023-01-01"`
+} as inactiveUsersDeletion
+💡 Bulk operations are more efficient than performing multiple individual operations when working with multiple records.
+
+Notes
+All operations return the affected record(s) in the variable specified after as
+
+Bulk operations can significantly improve performance when working with multiple records
+
+The field_name and field_value combination is used to identify specific records
+
+Patch operations are useful when you want to update specific fields without affecting others
+
+
+
+xanoscript - loops:
+
+Loops
+ For Each Loop
+Copy
+    foreach ($list) {
+      each as $alias {
+        // Functions go here
+      }
+    }
+Parameter
+Purpose
+Example
+$list
+
+The list to iterate through
+
+$users
+
+$alias
+
+The variable to store the item currently being iterated through
+
+user
+
+Place the functions that run as a part of your loop inside {} brackets after defining the alias.
+
+
+
+Copy
+    foreach ($x1) {
+      each as item {
+        util.sleep {
+          value = 1
+        }
+      }
+    }
+ For Loop 
+Copy
+    for (`$loops`) {
+      each as $index {
+         // Functions go here
+      }
+    }
+Parameter
+Purpose
+Example
+$loops
+
+The number of iterations in the loop
+
+10
+
+$index
+
+The name of the index variable
+
+index
+
+Place the functions that run as a part of your loop inside {} brackets after defining the index variable.
+
+
+
+Copy
+  for (`10`) {
+      each as index {
+        util.sleep {
+          value = 1
+        }
+      }
+    }
+ While Loop 
+Copy
+    while (`conditions`) {
+      each {
+         // Functions go here
+      }
+    }
+Parameter
+Purpose
+Example
+conditions
+
+The condition(s) that the loop will use to determine if it continues to run
+
+Copy
+false == false && true == true
+Place the functions that run as a part of your loop inside {} brackets after defining your conditions.
+
+
+
+Copy
+    while (`true == true && true == true`) {
+      each {
+        util.sleep {
+          value = 1
+        }
+      }
+    }
+ Break Out Of Loop
+Copy
+    break
+
+
+Copy
+    for (`10`) {
+      each as index {
+        conditional {
+          if (`$index == 5`) {
+            break
+          }
+        }
+      }
+    }
+ Continue to Next Iteration
+Copy
+    continue
+
+
+Copy
+  for (`10`) {
+      each as index {
+        conditional {
+          if (`$index == 5`) {
+            continue
+          }
+        }
+      }
+    }
+
+
+xanoscript - math:
+
+
+Math
+ Add Number
+Copy
+    math.add myVariable {
+      value = 5
+    }
+Parameter
+Purpose
+Example
+myVariable
+
+This is the variable you want to target with the math operation
+
+myVariable
+
+value
+
+The value you want to apply to the math operation
+
+5
+
+Copy
+    math.add myVariable {
+      value = 5
+    }
+
+
+ Subtract Number
+Copy
+    math.sub myVariable {
+      value = 5
+    }
+Parameter
+Purpose
+Example
+myVariable
+
+This is the variable you want to target with the math operation
+
+myVariable
+
+value
+
+The value you want to apply to the math operation
+
+5
+
+Copy
+    math.add myVariable {
+      value = 5
+    }
+
+
+ Multiply Number
+Copy
+    math.mul myVariable {
+      value = 5
+    }
+Parameter
+Purpose
+Example
+myVariable
+
+This is the variable you want to target with the math operation
+
+myVariable
+
+value
+
+The value you want to apply to the math operation
+
+5
+
+Copy
+    math.mul myVariable {
+      value = 5
+    }
+
+
+ Divide Number
+Copy
+    math.div myVariable {
+      value = 5
+    }
+Parameter
+Purpose
+Example
+myVariable
+
+This is the variable you want to target with the math operation
+
+myVariable
+
+value
+
+The value you want to apply to the math operation
+
+5
+
+Copy
+    math.div myVariable {
+      value = 5
+    }
+
+
+ Modulus Number
+Copy
+    math.mod myVariable {
+      value = 5
+    }
+Parameter
+Purpose
+Example
+myVariable
+
+This is the variable you want to target with the math operation
+
+myVariable
+
+value
+
+The value you want to apply to the math operation
+
+5
+
+Copy
+    math.mod myVariable {
+      value = 5
+    }
+
+
+ Bitwise AND Number
+Copy
+    math.bitwise.and myVariable {
+      value = 5
+    }
+Parameter
+Purpose
+Example
+myVariable
+
+This is the variable you want to target with the math operation
+
+myVariable
+
+value
+
+The value you want to apply to the math operation
+
+5
+
+Copy
+    math.bitwise.and myVariable {
+      value = 5
+    }
+
+
+ Bitwise OR Number
+Copy
+    math.bitwise.or myVariable {
+      value = 5
+    }
+Parameter
+Purpose
+Example
+myVariable
+
+This is the variable you want to target with the math operation
+
+myVariable
+
+value
+
+The value you want to apply to the math operation
+
+5
+
+Copy
+    math.bitwise.or myVariable {
+      value = 5
+    }
+
+
+ Bitwise XOR Number
+Copy
+    math.bitwise.xor myVariable {
+      value = 5
+    }
+Parameter
+Purpose
+Example
+myVariable
+
+This is the variable you want to target with the math operation
+
+myVariable
+
+value
+
+The value you want to apply to the math operation
+
+5
+
+Copy
+    math.bitwise.xor myVariable {
+      value = 5
+    }
+
+
+
+xanoscript - arrays:
+
+Arrays
+ Array Add to End
+Copy
+ array.push arrayVariable {
+      value = 10
+    }
+Parameter
+Purpose
+Example
+arrayVariable
+
+This is the array variable you want to target with the array operation
+
+arrayVariable
+
+value
+
+The value you want to apply to the array operation
+
+5
+
+Copy
+ array.push arrayVariable {
+      value = 10
+    }
+
+
+ Array Add to Beginning
+Copy
+ array.unshift arrayVariable {
+      value = 10
+    }
+Parameter
+Purpose
+Example
+arrayVariable
+
+This is the array variable you want to target with the array operation
+
+arrayVariable
+
+value
+
+The value you want to apply to the array operation
+
+5
+
+Copy
+ array.unshift arrayVariable {
+      value = 10
+    }
+
+
+ Array Remove From End Of
+Copy
+ array.pop arrayVariable as removedElement
+Parameter
+Purpose
+Example
+arrayVariable
+
+This is the array variable you want to target with the array operation
+
+arrayVariable
+
+removedElement
+
+The variable you want to store the removed item in
+
+removedElement
+
+Copy
+ array.pop arrayVariable as removedElement
+
+
+ Array Remove From Beginning Of
+Copy
+ array.shift arrayVariable as removedElement
+Parameter
+Purpose
+Example
+arrayVariable
+
+This is the array variable you want to target with the array operation
+
+arrayVariable
+
+removedElement
+
+The variable you want to store the removed item in
+
+removedElement
+
+Copy
+ array.shift arrayVariable as removedElement
+
+
+ Array Merge
+Copy
+    array.merge arrayVariable {
+      value = $anotherArrayVariable
+    }
+Parameter
+Purpose
+Example
+arrayVariable
+
+This is the variable that contains the first array you want to merge.
+
+arrayVariable
+
+value
+
+This is the second array that you want to merge. It could be a hardcoded array or from a variable.
+
+[1,2,3,4,5]
+
+$anotherArrayVariable
+
+Copy
+    array.merge arrayVariable {
+      value = $anotherArrayVariable
+    }
+
+
+ Find First Element In
+Copy
+    array.find ($arrayVariable) if (`$this == 1`) as foundElement
+Parameter
+Purpose
+Example
+$arrayVariable
+
+This is the variable that contains the array you want to find the element in.
+
+$arrayVariable
+
+if
+
+This is where you define the conditions of the element you want to find. Use $this to represent each individual item in the array.
+
+if (`$this == 1`)
+
+as
+
+The variable that you want to store the found element
+
+foundElement
+
+Copy
+    array.find ($arrayVariable) if (`$this == 1`) as foundElement
+
+
+
+
+ Find First Element Index In
+Copy
+    array.find_index ($arrayVariable) if (`$this == 1`) as foundElement
+Parameter
+Purpose
+Example
+$arrayVariable
+
+This is the variable that contains the array you want to find the element in.
+
+$arrayVariable
+
+if
+
+This is where you define the conditions of the element you want to find. Use $this to represent each individual item in the array.
+
+if (`$this == 1`)
+
+as
+
+The variable that you want to store the index of found element
+
+foundElement
+
+Copy
+    array.find_index ($arrayVariable) if (`$this == 1`) as foundElement
+
+
+
+
+ Has Any Element
+Copy
+    array.has ($arrayVariable) if (`$this == 1`) as foundElement
+Parameter
+Purpose
+Example
+$arrayVariable
+
+This is the variable that contains the array you want to find the element in.
+
+$arrayVariable
+
+if
+
+This is where you define the conditions of the element you want to find. Use $this to represent each individual item in the array.
+
+if (`$this == 1`)
+
+as
+
+The variable that you want to store the index of found element
+
+foundElement
+
+Copy
+    array.has ($arrayVariable) if (`$this == 1`) as foundElement
+
+
+
+
+ Has Every Element
+Copy
+array.every ($arrayVariable) if (`$this == 1`) as elementExists
+Parameter
+Purpose
+Example
+$arrayVariable
+
+This is the variable that contains the array you want to find the element in.
+
+$arrayVariable
+
+if
+
+This is where you define the conditions of the element you want to find. Use $this to represent each individual item in the array.
+
+if (`$this == 1`)
+
+as
+
+The variable that you want to store the result
+
+foundElement
+
+Copy
+array.every ($arrayVariable) if (`$this == 1`) as elementExists
+
+
+
+
+ Find All Elements
+Copy
+array.filter ($arrayVariable) if (`$this == 1`) as allFoundElements
+Parameter
+Purpose
+Example
+$arrayVariable
+
+This is the variable that contains the array you want to find the element in.
+
+$arrayVariable
+
+if
+
+This is where you define the conditions of the element you want to find. Use $this to represent each individual item in the array.
+
+if (`$this == 1`)
+
+as
+
+The variable that you want to store all of the found elements
+
+allFoundElements
+
+Copy
+array.filter ($arrayVariable) if (`$this == 1`) as allFoundElements
+
+
+
+
+ Get Element Count
+Copy
+array.filter_count ($arrayVariable) if (`$this == 1`) as allFoundElements
+Parameter
+Purpose
+Example
+$arrayVariable
+
+This is the variable that contains the array you want to find the element in.
+
+$arrayVariable
+
+if
+
+This is where you define the conditions of the element you want to find. Use $this to represent each individual item in the array.
+
+if (`$this == 1`)
+
+as
+
+The variable that you want to store the count of all of the found elements
+
+allFoundElements
+
+Copy
+array.filter_count ($arrayVariable) if (`$this == 1`) as allFoundElements
+
+
+xanoscript - objects
+
+Objects
+ Get Keys
+Copy
+    object.keys {
+      value = $object
+    } as keys
+Parameter
+Purpose
+Example
+$object
+
+The variable that the object you'd like to target is stored
+
+$object
+
+as
+
+The variable that you want to store the result
+
+keys
+
+Copy
+    object.keys {
+      value = $object
+    } as keys
+
+
+ Get Values
+Copy
+    object.values {
+      value = $object
+    } as values
+Parameter
+Purpose
+Example
+$object
+
+The variable that the object you'd like to target is stored
+
+$object
+
+as
+
+The variable that you want to store the result
+
+values
+
+Copy
+     object.values {
+      value = $object
+    } as values
+
+
+ Get Entries
+Copy
+    object.entries {
+      value = $object
+    } as entries
+Parameter
+Purpose
+Example
+$object
+
+The variable that the object you'd like to target is stored
+
+$object
+
+as
+
+The variable that you want to store the result
+
+entries
+
+Copy
+    object.entries {
+      value = $object
+    } as entries
+
+xanoscript - text:
+
+Text
+ Append Text
+Copy
+    text.append $myText {
+      value = "Text to append"
+    }
+Parameter
+Purpose
+Example
+$myText
+
+This is the variable that contains the text to target
+
+$myText
+
+value
+
+This is the text to append to the text in the variable.
+
+"Text to append"
+
+Copy
+    text.append $myText {
+      value = "Text to append"
+    }  
+
+
+ Prepend
+Copy
+    text.prepend $myText {
+      value = "Text to append"
+    }
+Parameter
+Purpose
+Example
+$myText
+
+This is the variable that contains the text to target
+
+$myText
+
+value
+
+This is the text to append to the text in the variable.
+
+"Text to append"
+
+Copy
+    text.append $myText {
+      value = "Text to append"
+    }
+
+
+ Trim
+Copy
+    text.trim $myText {
+      value = "Text to trim"
+    }
+Parameter
+Purpose
+Example
+$myText
+
+This is the variable that contains the text to target
+
+$myText
+
+value
+
+The text you'd like to trim. If you do not provide a value, blank space will be trimmed by default.
+
+"Text to trim"
+
+Copy
+    text.trim $myText {
+      value = "Text to trim"
+    }
+
+
+ Left Trim
+Copy
+    text.ltrim $myText {
+      value = "Text to trim"
+    }
+Parameter
+Purpose
+Example
+$myText
+
+This is the variable that contains the text to target
+
+$myText
+
+value
+
+The text you'd like to trim. If you do not provide a value, blank space will be trimmed by default.
+
+"Text to trim"
+
+Copy
+    text.ltrim $myText {
+      value = "Text to trim"
+    }
+
+
+ Right Trim
+Copy
+    text.rtrim $myText {
+      value = "Text to trim"
+    }
+Parameter
+Purpose
+Example
+$myText
+
+This is the variable that contains the text to target
+
+$myText
+
+value
+
+The text you'd like to trim. If you do not provide a value, blank space will be trimmed by default.
+
+"Text to trim"
+
+Copy
+    text.rtrim $myText {
+      value = "Text to trim"
+    }
+
+
+ Starts With
+Copy
+    text.starts_with $myText {
+      value = "Search text"
+    } as $textFound
+This function is also available as a case-insensitive version as:
+
+Copy
+text.istarts_with
+Parameter
+Purpose
+Example
+$myText
+
+This is the variable that contains the text to target
+
+$myText
+
+value
+
+The text you'd like to search for.
+
+"Search text"
+
+$textFound
+
+The variable to store the result.
+
+$textFound
+
+Copy
+    text.starts_with $myText {
+      value = "Search text"
+    } as $textFound
+
+
+ Ends With
+Copy
+    text.ends_with $myText {
+      value = "Search text"
+    } as $textFound
+This function is also available as a case-insensitive version as:
+
+Copy
+text.iends_with
+Parameter
+Purpose
+Example
+$myText
+
+This is the variable that contains the text to target
+
+$myText
+
+value
+
+The text you'd like to search for.
+
+"Search text"
+
+$textFound
+
+The variable to store the result.
+
+$textFound
+
+Copy
+    text.ends_with $myText {
+      value = "Search text"
+    } as $textFound
+
+
+ Contains
+Copy
+    text.contains $myText {
+      value = "Search text"
+    } as $textFound
+This function is also available as a case-insensitive version as:
+
+Copy
+text.icontains
+Parameter
+Purpose
+Example
+$myText
+
+This is the variable that contains the text to target
+
+$myText
+
+value
+
+The text you'd like to search for.
+
+"Search text"
+
+$textFound
+
+The variable to store the result.
+
+$textFound
+
+Copy
+    text.contains $myText {
+      value = "Search text"
+    } as $textFound
+
+
+xanoscript - variables:
+
+Variables
+ Create Variable
+Copy
+    var variableName {
+      value = "Hello world"
+    }
+Parameter
+Purpose
+Example
+variableName
+
+This is the name of the variable you want to create.
+
+variableName
+
+value
+
+This is what you want to store in the variable.
+
+For complex data types like arrays or objects, make sure to include a json_decode filter.
+
+Copy
+value = "Hello world"
+value = 1234
+value = "[1,2,3,4,5]"|json_decode
+Copy
+    var variableName {
+      value = "Hello world"
+    }
+
+
+ Update Variable
+Copy
+    var.update $variableName {
+      value = "Goodbye world"
+    }
+Parameter
+Purpose
+Example
+$variableName
+
+This is the name of the variable you want to update.
+
+$variableName
+
+value
+
+This is what you want to store in the variable.
+
+For complex data types like arrays or objects, make sure to include a json_decode filter.
+
+Copy
+value = "Hello world"
+value = 1234
+value = "[1,2,3,4,5]"|json_decode
+Copy
+    var.update $variableName {
+      value = "Goodbye world"
+    }
+
+xanoscript - conditionals:
+
+Conditionals
+ Conditional If/Then/Else Statement
+Copy
+    conditional {
+      if (`conditions`) {
+        // Functions go here
+      }
+      else {
+        // Functions go here
+        }
+    }
+Parameter
+Purpose
+Example
+conditions
+
+This is where the condition(s) you want to check will live.
+
+Copy
+`"a" == 1 && "b" == 2 || "c" == 3`
+Copy
+    conditional {
+      if (`"a" == 1 && "b" == 2 || "c" == 3`) {
+        util.sleep {
+          value = 3
+        }
+      }
+    
+      else {
+        util.sleep {
+          value = 30
+        }
+      }
+    }
+
+
+NOTE
+Else If and Switch are not implemented yet in XanoScript
+
+
+xanoscript - security
+
+Security
+ Generate UUID
+Copy
+    security.create_uuid as $myVariable
+Parameter
+Purpose
+Example
+$myVariable
+
+This is the variable you want to store the generated value in.
+
+$myVariable
+
+Copy
+    security.create_uuid as $myVariable
+
+
+ Create Authentication Token
+Copy
+    security.create_auth_token {
+      dbtable = "97"
+      extras = '{"role":"admin"}'|json_decode
+      expiration = 86400
+      id = 1
+    } as $authToken
+Parameter
+Purpose
+Example
+dbtable
+
+The ID of the database table that has authentication enabled
+
+"97"
+
+extras
+
+A JSON object that contains any extra information you want to include in the token
+
+Copy
+    '{"role":"admin"}'|json_decode
+expiration
+
+The time in seconds that the token should remain valid
+
+86400
+
+id
+
+The ID of the record to use to generate the authentication token
+
+1
+
+as
+
+The variable to store the generated token in
+
+$authToken
+
+Copy
+    security.create_auth_token {
+      dbtable = "97"
+      extras = '{"role":"admin"}'|json_decode
+      expiration = 86400
+      id = 1
+    } as $authToken
+
+
+ Validate Password
+Copy
+    security.check_password {
+      text_password = "textPassword"
+      hash_password = "hashedPassword"
+    } as tokenValidate
+Parameter
+Purpose
+Example
+text_password
+
+The text version of the password to check
+
+"textPassword"
+$textPassword
+
+hash_password
+
+The hashed version of the password to check, usually coming from a database table
+
+"hashedPassword"
+$user1.password
+
+Copy
+    security.check_password {
+      text_password = "textPassword"
+      hash_password = "hashedPassword"
+    } as tokenValidate
+
+
+ Generate Password
+Copy
+    security.create_password {
+      character_count = 12
+      require_lowercase = true
+      require_uppercase = true
+      require_digit = true
+      require_symbol = true
+      symbol_whitelist = "$#%&"
+    } as generatedPassword
+Parameter
+Purpose
+Example
+character_count
+
+The length of the generated password
+
+12
+
+require_lowercase
+require_uppercase
+require_digit
+require_symbol
+
+Various specifications for the generated password
+
+Copy
+require_lowercase = true
+require_uppercase = true
+require_digit = true
+require_symbol = true
+symbol_whitelist
+
+If you require symbols in your generated password, whitelist the allowed symbols here.
+
+Copy
+symbol_whitelist = "$#%&"
+as
+
+The variable that you want to store the generated password.
+
+generatedPassword
+
+Copy
+    security.create_password {
+      character_count = 12
+      require_lowercase = true
+      require_uppercase = true
+      require_digit = true
+      require_symbol = true
+      symbol_whitelist = "$#%&"
+    } as generatedPassword
+
+
+ Generate Random Number
+Copy
+    security.random_number {
+      min = 0
+      max = 9007199254740991
+    } as randomNumber
+Parameter
+Purpose
+Example
+min
+
+The beginning of the range for the randomly generated number
+
+0
+
+max
+
+The end of the range for the randomly generated number
+
+10000
+
+as
+
+The variable that you want to store the generated number
+
+randomNumber
+
+Copy
+    security.random_number {
+      min = 0
+      max = 9007199254740991
+    } as randomNumber
+
+
+ Generate Random Bytes
+Copy
+    security.random_bytes {
+      length = 16
+    } as randomBytes
+Parameter
+Purpose
+Example
+length
+
+The length of the string you'd like to generate
+
+16
+
+as
+
+The variable that you want to store the random bytes generated
+
+randomBytes
+
+Copy
+    security.random_bytes {
+      length = 16
+    } as randomBytes
+
+
+ Create Secret Key
+Copy
+    security.create_secret_key {
+      bits = 1024
+      format = "object"
+    } as crypto1
+Parameter
+Purpose
+Example
+bits
+
+The length of the key generated. Common values are 1024, 2048, 4096, etc...
+
+1024
+
+format
+
+The format of the key generated. This can be either object or base64
+
+"object"
+
+as
+
+The variable that you want to store the key
+
+crypto1
+
+Copy
+    security.create_secret_key {
+      bits = 1024
+      format = "object"
+    } as crypto1
+
+
+ Create RSA Key
+Copy
+    security.create_rsa_key {
+      bits = 1024
+      format = "object"
+    } as crypto1
+Parameter
+Purpose
+Example
+bits
+
+The length of the key generated. Common values are 1024, 2048, 4096, etc...
+
+1024
+
+format
+
+The format of the key generated. This can be either object or base64
+
+"object"
+
+as
+
+The variable that you want to store the key
+
+crypto1
+
+Copy
+    security.create_rsa_key {
+      bits = 1024
+      format = "object"
+    } as crypto1
+
+
+ Create Elliptic Curve Key
+Copy
+    security.create_curve_key {
+      curve = "P-256"
+      format = "object"
+    } as crypto3
+Parameter
+Purpose
+Example
+curve
+
+The curve applied to the generated key. Can be P-256, P-384, or P-521
+
+P-256
+
+format
+
+The format of the key generated. This can be either object or base64
+
+"object"
+
+as
+
+The variable that you want to store the key
+
+crypto3
+
+Copy
+    security.create_curve_key {
+      curve = "P-256"
+      format = "object"
+    } as crypto3
+
+
+
+
+xanoscript - apis & lambda
+
+
+APIs & Lambdas
+ Lambda
+Copy
+api.lambda {
+  code = "return true;"
+  timeout = 10
+} as x2
+Parameter
+Purpose
+Example
+code
+
+The JavaScript or TypeScript code to be executed in the lambda function
+
+"return true;"
+
+timeout
+
+The maximum execution time in seconds before the lambda times out
+
+10
+
+as
+
+Variable to hold the return of the Lambda function
+
+x2
+
+Copy
+api.lambda {
+  code = "const sum = (a, b) => a + b; return sum(5, 3);"
+  timeout = 5
+} as calculator
+ External API Request
+Copy
+api.request {
+  url = "https://www.myapi.com/myApiEndpoint"
+  method = "GET"
+  params = {}|set:"a":1
+  headers = []|array_push:"Authorization: Bearer abc123"
+} as api1
+Parameter
+Purpose
+Example
+url
+
+The endpoint URL to send the request to
+
+"https://www.myapi.com/myApiEndpoint"
+
+method
+
+The HTTP method to use
+
+"GET", "POST", "PUT", "DELETE"
+
+params
+
+Query parameters or body data to send with the request.
+
+`{}
+
+headers
+
+Array of HTTP headers to include in the request
+
+`[]
+
+as
+
+Variable name to reference this request
+
+api1
+
+Copy
+api.request {
+  url = "https://api.example.com/users"
+  method = "POST"
+  params = {}|set:"name":"John"|set:"age":30
+  headers = []|array_push:"Content-Type: application/json"
+} as createUser
+This creates an API request that:
+
+Sends a POST request to the specified URL
+
+Includes query parameters or body data
+
+Sets custom headers
+
+Can be referenced using the alias "createUser"
+
+ Streaming API Request
+Copy
+stream.from_request {
+  as = ""
+  url = ""
+  method = "GET"
+  params = {}
+  headers = []
+  timeout = 10
+  follow_location = true
+  verify_host = false
+  verify_peer = false
+  ca_certificate = ""
+  certificate = ""
+  certificate_pass = ""
+  private_key = ""
+  private_key_pass = ""
+} as stream1
+Parameter
+Purpose
+Example
+as
+
+Stream identifier
+
+"data_stream", "response_stream"
+
+url
+
+Request URL
+
+"https://api.example.com/stream"
+
+method
+
+HTTP method
+
+"GET", "POST", "PUT"
+
+params
+
+Request parameters
+
+{key: "value"}, {token: $auth.token}
+
+headers
+
+Request headers
+
+["Authorization: Bearer token"]
+
+timeout
+
+Request timeout in seconds
+
+10, 30, 60
+
+follow_location
+
+Follow redirects
+
+true, false
+
+verify_host
+
+Verify SSL host
+
+true, false
+
+verify_peer
+
+Verify SSL peer
+
+true, false
+
+ca_certificate
+
+CA certificate for SSL
+
+"ca-cert.pem"
+
+certificate
+
+Client certificate
+
+"client-cert.pem"
+
+certificate_pass
+
+Certificate password
+
+"certpass"
+
+private_key
+
+Private key file
+
+"private.key"
+
+private_key_pass
+
+Private key password
+
+"keypass"
+
+as
+
+Alias for stream
+
+stream1, http_stream
+
+Copy
+stream.from_request {
+  as = "events"
+  url = "https://api.service.com/stream"
+  method = "GET"
+  headers = [
+    "Authorization: Bearer "|add:$token,
+    "Accept: text/event-stream"
+  ]
+  timeout = 30
+  follow_location = true
+} as event_stream
+Creates stream from HTTP request
+
+Supports SSL/TLS configuration
+
+Configurable timeout and redirects
+
+Useful for consuming streaming APIs
+
+ Streaming API Response
+Copy
+api.stream {
+  value = ""
+}
+Parameter
+Purpose
+Example
+value
+
+Data to stream
+
+$stream_data, "chunk of data"
+
+Copy
+api.stream {
+  value = $processed_chunk
+}
+Streams data to client
+
+Supports chunked transfer
+
+Used in server-sent events
+
+Maintains open connection
+
+ Realtime Event
+Copy
+api.realtime_event {
+  channel = ""
+  data = ""
+  auth_table = ""
+  auth_id = ""
+}
+Parameter
+Purpose
+Example
+channel
+
+Event channel name
+
+"notifications", "user_123"
+
+data
+
+Event payload
+
+{type: "message", content: "Hello"}
+
+auth_table
+
+Authorization table
+
+"users", "organizations"
+
+auth_id
+
+Authorized entity ID
+
+"123", $user.id
+
+Copy
+api.realtime_event {
+  channel = "user:"|add:$user.id
+  data = {
+    type: "notification",
+    message: "New message received",
+    timestamp: $now
+  }
+  auth_table = "users"
+  auth_id = $user.id
+}
+Sends realtime events to clients
+
+xanoscript - redis:
+
+Data Caching (Redis)
+ Set Cache Value
+Copy
+redis.set {
+  key = ""
+  data = ""
+  ttl = 0
+}
+Parameter
+Purpose
+Example
+key
+
+Cache key identifier
+
+"user:123", "session:abc"
+
+data
+
+Value to store
+
+"data", {user: "john"}
+
+ttl
+
+Time-to-live in seconds
+
+300, 3600
+
+Copy
+redis.set {
+  key = "user:"|add:$user.id
+  data = $user.profile
+  ttl = 3600
+}
+Stores a value in cache
+
+Optional TTL for expiration
+
+Overwrites existing values
+
+ Get Cache Value
+Copy
+redis.get {
+  key = ""
+} as x1
+Parameter
+Purpose
+Example
+key
+
+Cache key to retrieve
+
+"user:123"
+
+as
+
+Alias for retrieved value
+
+x1, cached_data
+
+Copy
+redis.get {
+  key = "user:"|add:$user.id
+} as user_data
+Retrieves stored value
+
+Returns null if key doesn't exist
+
+ Has Cache Value
+Copy
+redis.has {
+  key = ""
+} as x2
+Parameter
+Purpose
+Example
+key
+
+Cache key to check
+
+"session:abc"
+
+as
+
+Alias for result
+
+x2, exists
+
+Copy
+redis.has {
+  key = "session:"|add:$session.id
+} as session_exists
+Checks if key exists in cache
+
+Returns boolean
+
+ Delete Cache Value
+Copy
+redis.del {
+  key = ""
+}
+Parameter
+Purpose
+Example
+key
+
+Cache key to delete
+
+"user:123"
+
+Copy
+redis.del {
+  key = "temp:"|add:$id
+}
+Removes key and value from cache
+
+No effect if key doesn't exist
+
+ Increment Cache Value
+Copy
+redis.incr {
+  package_key = ""
+  key = ""
+  by = 1
+} as x3
+Parameter
+Purpose
+Example
+package_key
+
+Optional namespace
+
+"app1"
+
+key
+
+Cache key to increment
+
+"counter:123"
+
+by
+
+Increment amount
+
+1, 5
+
+as
+
+Alias for new value
+
+x3, new_count
+
+Copy
+redis.incr {
+  key = "visits:"|add:$page.id
+  by = 1
+} as visit_count
+Increments numeric value
+
+Creates key with value 0 if doesn't exist
+
+ Decrement Cache Value
+Copy
+redis.decr {
+  key = ""
+  by = 1
+} as x4
+Parameter
+Purpose
+Example
+key
+
+Cache key to decrement
+
+"stock:123"
+
+by
+
+Decrement amount
+
+1, 5
+
+as
+
+Alias for new value
+
+x4, new_count
+
+Copy
+redis.decr {
+  key = "stock:"|add:$product.id
+  by = 1
+} as remaining_stock
+Decrements numeric value
+
+Creates key with value 0 if doesn't exist
+
+ Get Cache Keys
+Copy
+redis.keys {
+  search = ""
+} as keys1
+Parameter
+Purpose
+Example
+search
+
+Pattern to match keys
+
+"user", "session"
+
+as
+
+Alias for matched keys
+
+keys1, matching_keys
+
+Copy
+redis.keys {
+  search = "user"
+} as active_sessions
+Returns array of matching keys
+
+ Add To End of List
+Copy
+redis.push {
+  package_key = ""
+  key = ""
+  value = ""
+} as x5
+Parameter
+Purpose
+Example
+package_key
+
+Optional namespace
+
+"app1", "myservice"
+
+key
+
+List key
+
+"queue:tasks", "notifications"
+
+value
+
+Value to append
+
+"task1", {id: 123}
+
+as
+
+Alias for new list length
+
+x5, list_length
+
+Copy
+redis.push {
+  package_key = "notifications"
+  key = "user:"|add:$user.id
+  value = $new_message
+} as queue_length
+Adds value to end of list
+
+Creates list if it doesn't exist
+
+Returns new length of list
+
+Supports any data type for value
+
+ Add To Beginning of List
+Copy
+redis.unshift {
+  key = ""
+  value = ""
+} as x6
+Parameter
+Purpose
+Example
+key
+
+List key
+
+"queue:tasks", "recent_items"
+
+value
+
+Value to prepend
+
+"new_task", {priority: "high"}
+
+as
+
+Alias for new list length
+
+x6, list_length
+
+Copy
+redis.unshift {
+  key = "recent_views"
+  value = $page.id
+} as list_size
+Adds value to beginning of list
+
+Creates list if it doesn't exist
+
+Returns new length of list
+
+Useful for "most recent" lists
+
+ Remove From End of List
+Copy
+redis.pop {
+  key = ""
+} as x7
+Parameter
+Purpose
+Example
+key
+
+List key
+
+"queue:tasks", "stack:items"
+
+as
+
+Alias for popped value
+
+x7, last_item
+
+Copy
+redis.pop {
+  key = "task_queue"
+} as next_task
+Removes and returns last element
+
+Returns null if list is empty
+
+Reduces list length by 1
+
+Common for stack operations
+
+ Remove From Beginning of List
+Copy
+redis.shift {
+  key = ""
+} as x8
+Parameter
+Purpose
+Example
+key
+
+List key
+
+"queue:tasks", "processing"
+
+as
+
+Alias for shifted value
+
+x8, first_item
+
+Copy
+redis.shift {
+  key = "message_queue"
+} as next_message
+Removes and returns first element
+
+Returns null if list is empty
+
+Reduces list length by 1
+
+Common for queue operations
+
+ Remove From List
+Copy
+redis.remove {
+  key = ""
+  value = ""
+  count = 0
+}
+Parameter
+Purpose
+Example
+key
+
+List key
+
+"active_users", "blocked_ips"
+
+value
+
+Value to remove
+
+"user123", {id: 456}
+
+count
+
+Number of occurrences to remove
+
+0 (all), 1, -2
+
+Copy
+redis.remove {
+  key = "active_sessions"
+  value = $session.id
+  count = 0
+}
+Removes matching values from list
+
+Count=0 removes all occurrences
+
+Count>0 removes from head to tail
+
+Count<0 removes from tail to head
+
+ Get Length Of List
+Copy
+redis.count {
+  key = ""
+} as x9
+Parameter
+Purpose
+Example
+key
+
+List key
+
+"queue:pending", "users:online"
+
+as
+
+Alias for list length
+
+x9, count
+
+Copy
+redis.count {
+  key = "waiting_users"
+} as queue_size
+Returns current length of list
+
+Returns 0 if list doesn't exist
+
+Useful for queue management
+
+Quick operation regardless of list size
+
+ Get Elements From List
+Copy
+redis.range {
+  key = ""
+  start = 0
+  stop = -1
+} as x10
+Parameter
+Purpose
+Example
+key
+
+List key
+
+"recent:items", "leaderboard"
+
+start
+
+Start index
+
+0, 5, -10
+
+stop
+
+End index
+
+-1, 9, 20
+
+as
+
+Alias for range values
+
+x10, items
+
+Copy
+redis.range {
+  key = "recent_posts"
+  start = 0
+  stop = 9
+} as recent_items
+Returns range of list elements
+
+-1 means last element
+
+Supports negative indices
+
+Inclusive of start and stop indices
+
+ Rate Limit
+Copy
+redis.ratelimit {
+  key = "ip:"|add:$request.ip
+  max = 100
+  ttl = 3600
+  error = "Rate limit exceeded. Try again later."
+} as rate_status
+Implements rate limiting
+
+Tracks attempts within time window
+
+Returns current limit status
+
+Throws error when limit exceeded
+
+
+
+xanoscript - custom functions:
+
+Utility Functions
+ Return
+Copy
+return {
+  value = "value to return"
+}
+Parameter
+Purpose
+Example
+value
+
+The value to return from the function
+
+"Hello World", 123, {key: "value"}
+
+Copy
+return {
+  value = $api_response|get:"data"
+}
+Returns a value from the function execution
+
+Can return any data type (string, number, object, array, etc.)
+
+Terminates function execution
+
+ Debug Log
+Copy
+debug.log {
+  value = "Value to send"
+}
+Parameter
+Purpose
+Example
+value
+
+The value to output to the debug log
+
+"Debug message", $variable, `response
+
+Copy
+debug.log {
+  value = "Processing user: "|add:$user.id
+}
+Outputs a value to the debug log
+
+Useful for development and troubleshooting
+
+Can log any data type
+
+Does not affect function execution
+
+ Precondition
+Copy
+precondition `($a == 1)` {
+  error_type = "notfound"
+  error = "Error message to return"
+  payload = "Payload"
+}
+Parameter
+Purpose
+Example
+error_type
+
+The type of error to throw
+
+Can be one of the following:
+- standard
+- notfound
+- accessdenied
+- toomamyrequests
+- unauthorized
+- badrequest
+- inputerror
+
+error
+
+The error message to display
+
+"Resource not found", "Access denied"
+
+payload
+
+Additional data to include with the error
+
+"Error details", {reason: "Invalid input"}
+
+Copy
+precondition `($user.role != "admin")` {
+  error_type = "accessdenied"
+  error = "Admin access required"
+  payload = {
+    required_role: "admin",
+    current_role: $user.role
+  }
+}
+
+precondition `($user.role != "admin")` {
+  error_type = "accessdenied"
+  error = "Admin access required"
+  payload = {
+    required_role: "admin",
+    current_role: $user.role
+  }
+}
+Checks a condition and throws an error if the condition is true
+
+Allows specifying error type, message, and additional payload
+
+Useful for validation and access control
+
+Stops execution if condition is met
+
+ Stop and Debug
+Copy
+debug.stop {
+  value = "Value to return"
+}
+Parameter
+Purpose
+Example
+value
+
+The value to return when stopping execution
+
+"Debug stop message", $variable, {status: "stopped"}
+
+Copy
+debug.stop {
+  value = "Stopping execution"
+}
+Immediately stops function execution
+
+Returns the specified value
+
+Useful for debugging and development
+
+Can return any data type
+
+ Group
+Copy
+group {
+  stack {
+    util.sleep {
+      value = 1
+    }
+  
+    util.sleep {
+      value = 2
+    }
+  }
+}
+Parameter
+Purpose
+Example
+group
+
+Container for organizing operations
+
+group { ... }
+
+stack
+
+Executes operations in sequence
+
+stack { ... }
+
+value
+
+Duration to sleep in seconds
+
+1, 2, 0.5
+
+Copy
+group {
+  stack {
+    util.sleep {
+      value = 0.5
+    }
+    
+    debug.log {
+      value = "Half second passed"
+    }
+    
+    util.sleep {
+      value = 1
+    }
+  }
+}
+Groups related operations together
+
+Stack ensures sequential execution
+
+Sleep pauses execution for specified duration
+
+Operations in stack execute in order
+
+ Sleep
+Copy
+util.sleep {
+  value = 1
+}
+Parameter
+Purpose
+Example
+value
+
+Number of seconds to pause execution
+
+1, 0.5, 2.5
+
+Copy
+util.sleep {
+  value = 0.5
+}
+Pauses execution for specified number of seconds
+
+Accepts decimal values for sub-second precision
+
+Useful for rate limiting or creating delays
+
+ CSV Stream
+Copy
+stream.from_csv {
+  value = $input.csv_input
+  separator = ","
+  enclosure = '"'
+  escape_char = '"'
+} as csv_stream
+Parameter
+Purpose
+Example
+value
+
+Input CSV data source
+
+$input.csv_input, $file.content
+
+separator
+
+Character used to separate fields
+
+",", ";", "\t"
+
+enclosure
+
+Character used to enclose fields
+
+'"', "'"
+
+escape_char
+
+Character used to escape special characters
+
+'"', "\"
+
+as
+
+Alias to reference the stream
+
+csv_stream
+
+Copy
+stream.from_csv {
+  value = $input.users_data
+  separator = ","
+  enclosure = '"'
+  escape_char = '"'
+} as users_stream
+Creates a stream from CSV formatted data
+
+Configurable field separator, enclosure, and escape characters
+
+Assigns stream to an alias for later reference
+
+Useful for processing large CSV files
+
+ JSONL Stream
+Copy
+stream.from_jsonl {
+  value = $input.JSONL_file
+} as jsonl_stream
+Parameter
+Purpose
+Example
+value
+
+Input JSONL data source
+
+$input.JSONL_file, $file.content
+
+as
+
+Alias to reference the stream
+
+jsonl_stream
+
+Copy
+stream.from_jsonl {
+  value = $input.log_entries
+} as logs_stream
+Creates a stream from JSON Lines formatted data
+
+Each line must be a valid JSON object
+
+Assigns stream to an alias for later reference
+
+Useful for processing large datasets line by line
+
+ Set HTTP Header
+Copy
+util.set_header {
+  value = "HTTP 1.1 200 OK"
+  duplicates = "replace"
+}
+Parameter
+Purpose
+Example
+value
+
+HTTP header value to set
+
+"HTTP 1.1 200 OK", "Content-Type: application/json"
+
+duplicates
+
+How to handle duplicate headers
+
+"replace", "append"
+
+Copy
+util.set_header {
+  value = "Content-Type: application/json"
+  duplicates = "replace"
+}
+Sets HTTP response headers
+
+Controls how duplicate headers are handled
+
+Useful for customizing API responses
+
+Common for setting content types, status codes, and custom headers
+
+ Get All Variables
+Copy
+util.get_vars as all_variables
+Parameter
+Purpose
+Example
+as
+
+New variable to contain the returned variables
+
+all_variables, vars
+
+Copy
+util.get_vars as system_vars
+
+debug.log {
+  value = $system_vars
+}
+Returns an object containing all variables
+
+ Get All Inputs
+Copy
+util.get_all_input as all_input
+Parameter
+Purpose
+Example
+as
+
+Alias to reference the input data
+
+all_input, request_data
+
+Copy
+util.get_all_input as request_data
+
+debug.log {
+  value = request_data
+}
+Retrieves all input data from the current request as defined in the inputs section
+
+ Get All Raw Input
+Copy
+util.get_input {
+  encoding = "json"
+} as all_raw_input
+Parameter
+Purpose
+Example
+encoding
+
+Format of the input data
+
+"json", "raw", "text"
+
+as
+
+Alias to reference the input
+
+all_raw_input, request_body
+
+Copy
+util.get_input {
+  encoding = "json"
+} as request_body
+Retrieves raw input data from the request
+
+ Get Environment Variables
+Copy
+util.get_env as all_env_vars
+Parameter
+Purpose
+Example
+as
+
+Alias to reference the environment variables
+
+all_env_vars, env
+
+Copy
+util.get_env as env
+Returns an object containing all environment variables
+
+ Calculate Distance
+Copy
+util.geo_distance {
+  latitude_1 = 37.7749
+  longitude_1 = 122.4194
+  latitude_2 = 35.6762
+  longitude_2 = 139.6503
+} as distance
+Parameter
+Purpose
+Example
+latitude_1
+
+Latitude of first point
+
+37.7749, -33.8688
+
+longitude_1
+
+Longitude of first point
+
+122.4194, 151.2093
+
+latitude_2
+
+Latitude of second point
+
+35.6762, 51.5074
+
+longitude_2
+
+Longitude of second point
+
+139.6503, -0.1278
+
+as
+
+Alias to reference the calculated distance
+
+distance, route_length
+
+Copy
+util.geo_distance {
+  latitude_1 = $location1|get:"lat"
+  longitude_1 = $location1|get:"lng"
+  latitude_2 = $location2|get:"lat"
+  longitude_2 = $location2|get:"lng"
+} as route_distance
+Calculates the distance (straight line) between two geographic coordinates
+
+ IP Address Lookup
+Copy
+util.ip_lookup {
+  value = "1.1.1.1"
+} as ip_location
+Parameter
+Purpose
+Example
+value
+
+IP address to look up
+
+"1.1.1.1", "192.168.1.1", $request.ip
+
+as
+
+Alias to reference the lookup results
+
+ip_location, visitor_location
+
+Copy
+util.ip_lookup {
+  value = $request|get:"ip"
+} as visitor_info
+Performs geolocation lookup for an IP address
+
+ Set Data Source
+Copy
+db.set_datasource {
+  value = "test"
+}
+Parameter
+Purpose
+Example
+value
+
+Name of the datasource to use
+
+"test", "production", "staging"
+
+Copy
+db.set_datasource {
+  value = "staging"
+}
+Sets the active database datasource
+
+ Async Await
+Copy
+await {
+  ids = []
+  timeout = 10
+} as async_returns
+Parameter
+Purpose
+Example
+ids
+
+Array of async operation IDs to wait for
+
+[], ["task1", "task2"], $pending_tasks
+
+timeout
+
+Maximum time to wait in seconds
+
+10, 30, 60
+
+as
+
+Alias to reference the results
+
+async_returns, task_results
+
+Copy
+await {
+  ids = ["process1", "process2"]
+  timeout = 30
+} as operation_results
+Waits for completion of asynchronous operations
+
+Specifies maximum wait time
+
+Collects results from multiple async operations
+
+Returns results when all operations complete or timeout is reached
+
+ Template Engine
+Copy
+   util.template {
+      value = """
+        Write a personalized email to {{ $customer.firstName }} {{ $customer.lastName }} about their recent {{ $order.type }} purchase.
+        
+        Include:
+        - Reference to their purchase history (they've ordered {{ $customer.purchaseCount }} times)
+        - Mention that their {{ $order.item }} will be delivered on {{ $order.deliveryDate|date('F j, Y') }}
+        - If {{ $customer.isVIP }}, offer them a {{ $promotions.VIPDiscount }}% discount on their next purchase
+        - Thank them for being a customer since {{ $customer.joinDate|date('Y') }}
+        
+        Sign off with the name of their account manager: {{ $accountManager.name }}
+        """
+    } as $x1
+Parameter
+Purpose
+Example
+value
+
+The template you're using
+
+See above
+
+as
+
+The variable to output the template to
+
+as $x1
+
+
+xanoscript - files:
+
+File Storage
+ Create Image Metadata
+Copy
+storage.create_image {
+  access=public 
+  value = $input.file
+  filename = ""
+} as image_metadata
+Parameter
+Purpose
+Example
+access
+
+Access level for the stored image
+
+public, private
+
+value
+
+Source file to create image from
+
+$input.file, $file.data
+
+filename
+
+Name for the stored image file
+
+"profile.jpg", "avatar.png"
+
+as
+
+Alias to reference the image metadata
+
+image_metadata, uploaded_image
+
+Copy
+storage.create_image access=public {
+  value = $input.profile_photo
+  filename = "user_"|add:$user.id|add:"_profile.jpg"
+} as profile_image
+Creates metadata about the stored image
+
+ Create Video Metadata
+Copy
+storage.create_video {
+  access=public 
+  value = $image_metadata
+  filename = ""
+} as x1
+Parameter
+Purpose
+Example
+access
+
+Access level for the stored video
+
+public, private
+
+value
+
+Source file to create video from
+
+$input.video, $file.data
+
+filename
+
+Name for the stored video file
+
+"video.mp4", "recording.mov"
+
+as
+
+Alias to reference the video metadata
+
+x1, video_data
+
+Copy
+storage.create_video access=public {
+  value = $input.video_upload
+  filename = "video_"|add:$timestamp|add:".mp4"
+} as uploaded_video
+Creates metadata for a video file
+
+ Create Audio Metadata
+Copy
+storage.create_audio {
+  access=public 
+  value = $input.file
+  filename = ""
+} as x2
+Parameter
+Purpose
+Example
+access
+
+Access level for the stored audio
+
+public, private
+
+value
+
+Source file to create audio from
+
+$input.file, $audio.data
+
+filename
+
+Name for the stored audio file
+
+"recording.mp3", "audio.wav"
+
+as
+
+Alias to reference the audio metadata
+
+x2, audio_data
+
+Copy
+storage.create_audio access=public {
+  value = $input.audio_upload
+  filename = "audio_"|add:$timestamp|add:".mp3"
+} as uploaded_audio
+Creates metadata for audio file
+
+ Create Attachment Metadata
+Copy
+storage.create_attachment {
+  access=public 
+  value = $input.file
+  filename = ""
+} as x3
+Parameter
+Purpose
+Example
+access
+
+Access level for the stored attachment
+
+public, private
+
+value
+
+Source file to create attachment from
+
+$input.file, $document.data
+
+filename
+
+Name for the stored attachment
+
+"document.pdf", "spreadsheet.xlsx"
+
+as
+
+Alias to reference the attachment metadata
+
+x3, file_data
+
+Copy
+storage.create_attachment access=public {
+  value = $input.document
+  filename = "file_"|add:$user.id|add:"_"|add:$original_filename
+} as uploaded_file
+Creates metadata for the attachment
+
+ Create File Resource
+Copy
+storage.create_file_resource {
+  filename = "filename.ext"
+  filedata = "filedata"
+}
+Parameter
+Purpose
+Example
+filename
+
+Name of the file to create
+
+"document.txt", "data.json"
+
+filedata
+
+Content of the file
+
+"Hello World", $encoded_data
+
+Copy
+storage.create_file_resource {
+  filename = "export_"|add:$timestamp|add:".csv"
+  filedata = $processed_data|to_csv
+}
+Creates a file resource from provided data
+
+ Get File Resource Data
+Copy
+storage.read_file_resource {
+  value = $input.file
+} as file2
+Parameter
+Purpose
+Example
+value
+
+File resource to read
+
+$input.file, $stored_file.id
+
+as
+
+Alias to reference the file contents
+
+file2, file_contents
+
+Copy
+storage.read_file_resource {
+  value = $stored_document.id
+} as document_contents
+Reads contents of a stored file resource
+
+ Delete File
+Copy
+delete_file {
+  pathname = "/path/to/file.ext"
+}
+Parameter
+Purpose
+Example
+pathname
+
+Path to the file to delete
+
+"/path/to/file.ext", $file.path
+
+Copy
+delete_file {
+  pathname = "/uploads/"|add:$file.name
+}
+Deletes a file from the specified path
+
+Requires full path to the file
+
+Permanently removes the file
+
+Use with caution as deletion cannot be undone
+
+ Sign Private File URL
+Copy
+storage.sign_private_url {
+  pathname = "/path/to/privatefile.ext"
+  ttl = 30
+} as x4
+Parameter
+Purpose
+Example
+pathname
+
+Path to the private file
+
+"/path/to/privatefile.ext", $file.path
+
+ttl
+
+Time-to-live in seconds for the signed URL
+
+30, 3600, 86400
+
+as
+
+Alias to reference the signed URL
+
+x4, signed_url
+
+Copy
+storage.sign_private_url {
+  pathname = $private_file.path
+  ttl = 3600  // 1 hour
+} as temporary_url
+Generates a temporary signed URL for accessing private files
+
+
+xanoscript - background tasks:
+
+
+XanoScript for Background Tasks
+NOTICE
+XanoScript is in beta and it is strongly recommended that you do not use it in production at this time.
+
+While there should be significant parity between the visual builder and XanoScript, we are still fine-tuning and adjusting XanoScript, and breaking changes may be introduced.
+
+Navigation
+Introduction
+
+Key Concepts
+
+XanoScript - Database
+
+XanoScript - Functions and APIs
+
+XanoScript - Background Tasks
+
+XanoScript Function Reference
+
+XanoScript Filter Reference
+
+Accessing XanoScript in your Background Tasks
+Use the XanoScript toggle above the function stack to access XanoScript.
+
+
+What does a XanoScript Background Task look like?
+This is a typical background task that loops through some database records on a cadence.
+
+
+This is what the XanoScript version looks like.
+
+Copy
+task "My background task" {
+  description = "Here's my description"
+  stack {
+    db.query user as user1
+    foreach ($user1) {
+      each as item {
+        db.edit user {
+          field_name = "id"
+          field_value = $item.id
+          data = {name: $item.name|upper}
+        } as user2
+      }
+    }
+  }
+
+  schedule {
+    events = [
+      {
+        starts_on: 2025-03-16 10:00:00+0000
+        freq     : 604800
+        ends_on  : 2025-03-30 05:00:00+0000
+      }
+    ]
+  }
+}
+Definition and settings
+Give your task a name, and include a { at the end.
+
+Copy
+task "My background task" {
+You can add a description as the first line inside of the braces.
+
+Copy
+  description = "Here's my description"
+The function stack
+Please refer to XanoScript for Function Stacks to learn how function stacks are written in XanoScript.
+
+Schedule
+The scheduling of a background task begins with:
+
+Copy
+  schedule {
+    events = [
+Inside of the Events array, you'll want to add an object for each scheduling item. These objects contain a starts_on date/time, a frequency in seconds at which the task should run, and an ends_on date/time.
+
+Scheduling Examples
+A daily recurring task that starts on Monday, March 17, 2025 at 9:00 AM UTC and runs for five business days, ending on Friday, March 21, 2025 at 9:00 AM UTC. The frequency is 86400 seconds (1 day).
+
+Copy
+{
+  starts_on: 2025-03-17 09:00:00+0000
+  freq     : 86400
+  ends_on  : 2025-03-21 09:00:00+0000
+}
+This represents a weekly recurring task that starts on Sunday, March 16, 2025 at 10:00 AM UTC and runs for two weeks, ending on Sunday, March 30, 2025 at 5:00 AM UTC. The frequency is set to 604800 seconds (7 days).
+
+Copy
+{
+  starts_on: 2025-03-16 10:00:00+0000
+  freq     : 604800
+  ends_on  : 2025-03-30 05:00:00+0000
+}
+
+xanoscript filter reference:
+
+Using Filters in XanoScript
+Filters in XanoScript are applied right after the target value using a | pipe character.
+
+As an example, we have a text string stored in a variable called x1. We want to apply a capitalize filter to it.
+
+This is what defining the variable would look like in XanoScript.
+
+Copy
+    var x1 {
+      value = "hello"
+    }
+When we add the filter, it looks like this.
+
+Copy
+    var x1 {
+      value = "hello"|capitalize
+    }
+If a filter has parameters required to use it, we can use : characters to add and separate them.
+
+As an example, we'll take our text string and use the concat filter to append additional text to it with a separator. "hello" will become "hello, world". The concat filter asks for two parameters: a value and a separator. We'll use : to separate each parameter.
+
+Copy
+    var x1 {
+      value = "hello"|concat:"world":", "
+    }
+You can add multiple filters by separating each one with pipe characters.
+
+Copy
+      value = "hello"|concat:"world":", "|capitalize
+You can also nest filters. In this example, we're using the capitalize filter specifically on "world" inside of the concat filter.
+
+Copy
+      value = "hello"|concat:"world"|capitalize:", "
+"
+
+
+Manipulation
+ fill
+value|fill:start:length
+
+Copy
+0|fill:0:10     // Creates [0,0,0,0,0,0,0,0,0,0]
+"x"|fill:2:5    // Creates [null,null,"x","x","x","x","x"]
+true|fill:1:3   // Creates [null,true,true,true]
+ fill_keys
+value|fill_keys:keys
+
+Copy
+"value"|fill_keys:'["a","b","c"]'    // Creates {"a":"value","b":"value","c":"value"}
+0|fill_keys:'["x","y"]'              // Creates {"x":0,"y":0}
+ first_notempty
+value|first_notempty:default
+
+Copy
+""|first_notempty:"default"          // Returns "default"
+"value"|first_notempty:"default"     // Returns "value"
+ first_notnull
+value|first_notnull:default
+
+Copy
+null|first_notnull:"default"         // Returns "default"
+"value"|first_notnull:"default"      // Returns "value"
+ get
+value|get:key:default
+
+Copy
+{"name":"John"}|get:"name":"unknown"     // Returns "John"
+{}|get:"name":"unknown"                  // Returns "unknown"
+ has
+value|has:key
+
+Copy
+{"name":"John"}|has:"name"     // Returns true
+{"name":"John"}|has:"age"      // Returns false
+ set
+value|set:key:new_value
+
+Copy
+{}|set:"name":"John"                     // Returns {"name":"John"}
+{"age":30}|set:"name":"John"            // Returns {"age":30,"name":"John"}
+ set_conditional
+value|set_conditional:key:new_value:condition
+
+Copy
+{}|set_conditional:"status":"active":true      // Returns {"status":"active"}
+{}|set_conditional:"status":"active":false     // Returns {}
+ set_ifnotempty
+value|set_ifnotempty:key:new_value
+
+Copy
+{}|set_ifnotempty:"name":""           // Returns {}
+{}|set_ifnotempty:"name":"John"       // Returns {"name":"John"}
+ set_ifnotnull
+value|set_ifnotnull:key:new_value
+
+Copy
+{}|set_ifnotnull:"name":null          // Returns {}
+{}|set_ifnotnull:"name":"John"        // Returns {"name":"John"}
+ transform
+value|transform:transformation
+
+Copy
+"hello"|transform:"upper"              // Returns "HELLO"
+"WORLD"|transform:"lower"             // Returns "world"
+ unset
+value|unset:key
+
+Copy
+{"name":"John","age":30}|unset:"age"   // Returns {"name":"John"}
+{"name":"John"}|unset:"address"        // Returns {"name":"John"}
+
+
+Timestamp
+ add_ms_to_timestamp
+value|add_ms_to_timestamp:milliseconds
+
+Copy
+1698710400000|add_ms_to_timestamps:5000     // Adds 5 seconds (5000ms) to timestamp
+1698710400000|add_ms_to_timestamp:-2000    // Subtracts 2 seconds (2000ms) from timestamp
+ add_secs_to_timestamp
+value|add_secs_to_timestamp
+
+Copy
+1698710400000|add_secs_to_timestamp:60     // Adds 60 seconds to timestamp
+1698710400000|add_secs_to_timestamp:-30    // Subtracts 30 seconds from timestamp
+ format_timestamp
+value|format_timestamp:format:timezone
+
+Copy
+1698710400000|format_timestamp:"YYYY-MM-DD":"UTC"     // Returns "2023-10-31"
+1698710400000|format_timestamp:"HH:mm:ss":"America/New_York"    // Returns time in ET
+ parse_timestamp
+value|parse_timestamp:format:timezone
+
+Copy
+"2023-10-31"|parse_timestamp:"YYYY-MM-DD":"UTC"    // Returns 1698710400000
+"15:30:00"|parse_timestamp:"HH:mm:ss":"UTC"        // Converts time to epoch ms
+ transform_timestamp
+value|transform_timestamp:format:timezone
+
+Copy
+1698710400000|transform_timestamp:"X":"UTC"              // Returns unix timestamp
+1698710400000|transform_timestamp:"iso":"UTC"            // Returns ISO format
+
+
+Array
+ append
+value|append:item:key
+
+Copy
+[1,2]|append:3                // Returns [1,2,3]
+{"a":1}|append:2:"b"         // Returns {"a":1,"b":2}
+ count
+value|count
+
+Copy
+[1,2,3]|count               // Returns 3
+{"a":1,"b":2}|count        // Returns 2
+ diff
+value|diff:array
+
+Copy
+[1,2,3]|diff:[2,3]    // Returns [1]
+[4,5,6]|diff:[4,5]    // Returns [6]
+ diff_assoc
+value|diff_assoc:array
+
+Copy
+{"a":1,"b":2}|diff_assoc:{"b":2,"c":3}    // Returns {"a":1}
+{"x":1,"y":2}|diff_assoc:{"y":3,"z":4}    // Returns {"x":1,"y":2}
+ entries
+value|entries
+
+Copy
+[1,2,3]|entries                // Returns [[0,1],[1,2],[2,3]]
+{"a":1,"b":2}|entries         // Returns [["a",1],["b",2]]
+ every
+value|every:code:timeout
+
+Copy
+[2,4,6]|every:"x % 2 == 0":10      // Returns true (all numbers are even)
+[1,2,3]|every:"x > 0":10           // Returns true (all numbers are positive)
+["cat","car"]|every:"x[0] == 'c'":5  // Returns true (all strings start with 'c')
+[{"age":20},{"age":30}]|every:"x.age >= 18":10  // Returns true (all ages are adult)
+ filter
+value|filter:code:timeout
+
+Copy
+[1,2,3,4]|filter:"x > 2"              // Returns [3,4]
+["apple","banana"]|filter:"len(x) > 4"  // Returns ["banana"]
+[{"age":20},{"age":30}]|filter:"x.age > 25"  // Returns [{"age":30}]
+ filter_empty
+value|filter_empty
+
+Copy
+[1,"",null,2]|filter_empty    // Returns [1,2]
+[0,false,"test"]|filter_empty // Returns ["test"]
+ find
+value|find:code:timeout
+
+Copy
+[1,2,3]|find:"x > 1":10              // Returns 2 (first number greater than 1)
+["cat","dog"]|find:"len(x) > 2":5    // Returns "cat" (first string longer than 2)
+[{"age":20},{"age":30}]|find:"x.age > 25":10  // Returns {"age":30}
+ findIndex
+value|findIndex:code:timeout
+
+Copy
+[1,2,3]|findIndex:"x > 1":10              // Returns 1 (index of first number > 1)
+["cat","dog"]|findIndex:"len(x) > 2":5    // Returns 0 (index of first string longer than 2)
+[{"age":20},{"age":30}]|findIndex:"x.age > 25":10  // Returns 1
+ map
+value|map:code:timeout
+
+Copy
+[1,2,3]|map:"x * 2":10                // Returns [2,4,6]
+["a","b"]|map:"upper(x)":5            // Returns ["A","B"]
+[{"n":1},{"n":2}]|map:"x.n + 1":10    // Returns [2,3]
+ range
+value|range:start:end
+
+Copy
+null|range:1:5    // Returns [1,2,3,4,5]
+null|range:0:2    // Returns [0,1,2]
+null|range:-2:2   // Returns [-2,-1,0,1,2]
+ reduce
+value|reduce:initial:code:timeout
+
+Copy
+[1,2,3]|reduce:0:"acc + x":10           // Returns 6 (sum of array)
+["a","b"]|reduce:"":"acc + x":5         // Returns "ab" (string concatenation)
+[1,2,3]|reduce:1:"acc * x":10           // Returns 6 (product of array)
+ first
+value|first
+
+Copy
+[1,2,3]|first    // Returns 1
+[]|first         // Returns null
+ flatten
+value|flatten
+
+Copy
+[[1,2],[3,4]]|flatten    // Returns [1,2,3,4]
+[1,[2,[3]]]|flatten      // Returns [1,2,3]
+ index_by
+value|index_by:key
+
+Copy
+[{"id":1,"name":"a"},{"id":2,"name":"b"}]|index_by:"id"    // Returns {1:{"id":1,"name":"a"},2:{"id":2,"name":"b"}}
+ intersect
+value|intersect:array
+
+Copy
+[1,2,3]|intersect:[2,3,4]    // Returns [2,3]
+["a","b"]|intersect:["b","c"]    // Returns ["b"]
+ intersect_assoc
+value|intersect_assoc:array
+
+Copy
+{"a":1,"b":2}|intersect_assoc:{"b":2,"c":3}    // Returns {"b":2}
+ join
+value|join:separator
+
+Copy
+[1,2,3]|join:","    // Returns "1,2,3"
+["a","b"]|join:"-"  // Returns "a-b"
+ keys
+value|keys
+
+Copy
+{"a":1,"b":2}|keys    // Returns ["a","b"]
+[1,2,3]|keys         // Returns [0,1,2]
+ last
+value|last
+
+Copy
+[1,2,3]|last    // Returns 3
+[]|last         // Returns null
+ merge
+value|merge:array
+
+Copy
+[1,2]|merge:[3,4]    // Returns [1,2,3,4]
+{"a":1}|merge:{"b":2}    // Returns {"a":1,"b":2}
+ merge_recursive
+value|merge_recursive:array
+
+Copy
+{"a":[1]}|merge_recursive:{"a":[2]}    // Returns {"a":[1,2]}
+ pick
+value|pick:keys
+
+Copy
+{"a":1,"b":2,"c":3}|pick:["a","b"]    // Returns {"a":1,"b":2}
+ pop
+value|pop
+
+Copy
+[1,2,3]|pop    // Returns 3
+ prepend
+value|prepend:item:key
+
+Copy
+[1,2]|prepend:0                // Returns [0,1,2]
+{"b":2}|prepend:1:"a"         // Returns {"a":1,"b":2}
+ push
+value|push:item
+
+Copy
+[1,2]|push:3    // Returns [1,2,3]
+[]|push:1       // Returns [1]
+ remove
+value|remove:item:key:strict
+
+Copy
+[1,2,3]|remove:2    // Returns [1,3]
+{"a":1,"b":2}|remove:null:"b":true    // Returns {"a":1}
+ reverse
+value|reverse
+
+Copy
+[1,2,3]|reverse    // Returns [3,2,1]
+["a","b"]|reverse  // Returns ["b","a"]
+ safe_array
+value|safe_array
+
+Copy
+null|safe_array    // Returns []
+[1,2]|safe_array  // Returns [1,2]
+ shift
+value|shift
+
+Copy
+[1,2,3]|shift    // Returns [2,3]
+[]|shift         // Returns []
+ shuffle
+value|shuffle
+
+Copy
+[1,2,3]|shuffle    // Returns randomly ordered array
+["a","b"]|shuffle  // Returns randomly ordered array
+ slice
+value|slice:offset:length
+
+Copy
+[1,2,3,4]|slice:1:2    // Returns [2,3]
+["a","b","c"]|slice:0:2    // Returns ["a","b"]
+ unique
+value|unique:key
+
+Copy
+[1,2,2,3]|unique    // Returns [1,2,3]
+[{"id":1},{"id":1}]|unique:"id"    // Returns [{"id":1}]
+ sort
+value|sort:key:type:desc
+
+Copy
+[{"a":2},{"a":1}]|sort:"a":"number":false    // Returns [{"a":1},{"a":2}]
+["b","a"]|sort:"":"text":true                // Returns ["b","a"]
+ unpick
+value|unpick:keys
+
+Copy
+{"a":1,"b":2,"c":3}|unpick:["a","b"]    // Returns {"c":3}
+ unshift
+value|unshift:item
+
+Copy
+[1,2]|unshift:0    // Returns [0,1,2]
+[]|unshift:1       // Returns [1]
+ values
+value|values
+
+Copy
+{"a":1,"b":2}|values    // Returns [1,2]
+[1,2,3]|values         // Returns [1,2,3]
+ shuffle
+value|shuffle
+
+Copy
+{"a":1,"b":2}|shuffle   // Returns a shuffled version of the array
+
+
+xanoscript syntax updates:
+
+
+Improved syntax for multiline inline arrays
+
+var $x1 {
+  value = [
+    1,
+    2,
+    3
+  ]|sum
+}
+
+
+Improved syntax for multiline inline objects
+
+var $x1 {
+  value = {
+    x: {
+      a: 1 + 2
+      b: $input.score * 2
+    }
+  }
+}
+
+
+Improved syntax for multiline whitespace friendly values within a single object
+
+var $x1 {
+  value = {
+    tls_key: """
+    -----BEGIN PRIVATE KEY-----
+    MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAN3t60NK8J5vjguY
+    D9ucoAxQLw1OTMrH9ziadUWnwdcHv8oneOHi8YgpDTP3PIdHUWeYp3LJ5OsWJXCV
+    dd2phuX1JUA/Re4=
+    -----END PRIVATE KEY-----
+    """
+    tls_csr: """
+    -----BEGIN CERTIFICATE-----
+    MIIC1DCCAj2gAwIBAgIUD7gqGJUgPwUCZE1qUkCxXvTKruMwDQYJKoZIhvcNAQEL
+    M6YsNBo8mj3Rhdp+sufgTppFVb2rOZMtZqLatolRszkzQc8qY+GdCNwEG9G1fER/
+    1K4DZjn7Jxg=
+    -----END CERTIFICATE-----
+    """
+  }
+}
+
+
+Bug fix - previously was able to add schema with empty names using “”
+
+schema {
+  text first_name
+  text last_name
+  text ""          // this would break
+}
+
+
+New support for inline filters on statement results
+
+function example {
+  stack {
+    api.request {
+      url = "https://support.oneskyapp.com/hc/en-us/article_attachments/202761627"
+      method = "GET"
+    } as $api1|get:"response.result.fruit"
+  }
+
+  response {
+    value = $api1
+  }

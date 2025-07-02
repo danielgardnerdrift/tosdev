@@ -1,0 +1,120 @@
+{
+    "name": "Tos Chat Assistant",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "chat",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "webhook-chat-input",
+        "name": "Chat Input",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [240, 300],
+        "webhookId": "tos-chat-webhook"
+      },
+      {
+        "parameters": {
+          "model": "claude-3-5-sonnet-20241022",
+          "options": {
+            "systemMessage": "You are Tos, an expert Xano backend developer assistant. You help users build backends by:\n\n1. Understanding their requirements\n2. Using available Xano tools to inspect existing structure\n3. Generating perfect XanoScript\n4. Deploying to Xano\n\nYou have access to tools for:\n- Listing tables in their workspace\n- Getting table schemas\n- Browsing API groups\n- Creating new tables with XanoScript\n- Creating API endpoints with XanoScript\n- Generating XanoScript code\n\nBe conversational and helpful. Always explain what you're doing step by step. When users ask to create something, use the appropriate tools to make it happen in their Xano workspace.",
+            "maxTokens": 4000,
+            "temperature": 0.1
+          }
+        },
+        "id": "claude-agent",
+        "name": "Tos Assistant",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 1,
+        "position": [460, 300]
+      },
+      {
+        "parameters": {
+          "sseEndpoint": "http://localhost:3001/mcp/sse",
+          "authentication": "bearer",
+          "bearerToken": "={{ $('Chat Input').json.session_id }}",
+          "toolsToInclude": "selected",
+          "selectedTools": [
+            "list_workspace_tables",
+            "get_table_schema",
+            "browse_api_groups", 
+            "create_table",
+            "create_api_endpoint",
+            "generate_xanoscript"
+          ]
+        },
+        "id": "mcp-xano-tools",
+        "name": "Xano Tools",
+        "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+        "typeVersion": 1,
+        "position": [460, 450]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Format the response for the chat client\nconst output = $('Tos Assistant').json.output || $('Tos Assistant').json.text;\nconst sessionId = $('Chat Input').json.session_id;\nconst userMessage = $('Chat Input').json.message;\n\nreturn {\n  success: true,\n  message: output,\n  session_id: sessionId,\n  user_message: userMessage,\n  timestamp: new Date().toISOString(),\n  app: 'Tos'\n};"
+        },
+        "id": "format-response",
+        "name": "Format Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [680, 300]
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ $json }}"
+        },
+        "id": "webhook-response",
+        "name": "Send Response",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1,
+        "position": [900, 300]
+      }
+    ],
+    "connections": {
+      "Chat Input": {
+        "main": [
+          [
+            {
+              "node": "Tos Assistant",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tos Assistant": {
+        "main": [
+          [
+            {
+              "node": "Format Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format Response": {
+        "main": [
+          [
+            {
+              "node": "Send Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "pinData": {},
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "tags": [],
+    "triggerCount": 0,
+    "updatedAt": "2025-01-18T10:00:00.000Z",
+    "versionId": "1"
+  }
